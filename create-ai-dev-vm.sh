@@ -212,7 +212,9 @@ choose "Base OS image" "$VM_BASE_IMAGE" VM_BASE_IMAGE \
 # Step 3: Resources
 ask "vCPUs" "$VM_VCPUS" VM_VCPUS
 ask "RAM (e.g. 32G)" "$VM_RAM" VM_RAM
+[[ "$VM_RAM" =~ ^[0-9]+$ ]] && VM_RAM="${VM_RAM}G"
 ask "Disk size (e.g. 200G)" "$VM_DISK_SIZE" VM_DISK_SIZE
+[[ "$VM_DISK_SIZE" =~ ^[0-9]+$ ]] && VM_DISK_SIZE="${VM_DISK_SIZE}G"
 
 # Step 4: Admin user
 ask "Admin username on VM" "$VM_ADMIN_USER" VM_ADMIN_USER

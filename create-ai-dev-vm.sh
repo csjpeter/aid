@@ -474,6 +474,13 @@ else
         "${VM_ADMIN_USER}@${VM_IP}" \
         "GITHUB_PAT='${GITHUB_PAT}' CLAUDE_API_KEY='${CLAUDE_API_KEY}' bash /tmp/provision-ai-dev-vm.sh"
 
+    if [ -f "$HOME/.claude.json" ]; then
+        log_info "Copying ~/.claude.json to VM..."
+        scp -o StrictHostKeyChecking=no \
+            "$HOME/.claude.json" \
+            "${VM_ADMIN_USER}@${VM_IP}:~/.claude.json"
+    fi
+
     log_title "VM $VM_NAME is ready!"
     log_info "Connect:        ssh ${VM_ADMIN_USER}@${VM_IP}"
     log_info "GUI via X11:    ssh -X ${VM_ADMIN_USER}@${VM_IP} android-studio"

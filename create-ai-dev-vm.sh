@@ -94,9 +94,10 @@ Usage: $(basename "$0") [COMMAND]
 Create and manage KVM-based AI developer VMs.
 
 Commands:
-  create   Interactively collect config, create, and provision a new VM (default)
-  list     List all configured VMs with their IP address and virsh status
-  help     Show this help message
+  create          Interactively collect config, create, and provision a new VM (default)
+  list            List all configured VMs with their IP address and virsh status
+  delete [name]   Stop and permanently delete a VM and its disk (config preserved)
+  help            Show this help message
 
 VM naming:
   Default name follows the pattern ai-dev-vm-N (N starting at 2).
@@ -131,6 +132,56 @@ cmd_list() {
     done
 }
 
+cmd_delete() {
+    local vm_name="${1:-}"
+
+    if [ -z "$vm_name" ]; then
+        cmd_list
+        echo
+        ask_optional "VM name to delete" vm_name
+    fi
+    if [ -z "$vm_name" ]; then
+        log_error "No VM name specified."
+        exit 1
+    fi
+
+    if ! sudo virsh dominfo "$vm_name" &>/dev/null; then
+        log_error "VM '$vm_name' not found in libvirt."
+        exit 1
+    fi
+
+    log_warning "This will permanently delete VM '$vm_name' and its disk image."
+    local confirm
+    read -rp "$(echo -e "${YELLOW}?${NC} Type the VM name to confirm: ")" confirm
+    if [ "$confirm" != "$vm_name" ]; then
+        log_info "Aborted."
+        exit 0
+    fi
+
+    local vm_ip=""
+    local conf="$CONFIG_DIR/${vm_name}.conf"
+    [ -f "$conf" ] && vm_ip=$(grep '^VM_IP=' "$conf" | cut -d'"' -f2)
+
+    local state
+    state=$(sudo virsh domstate "$vm_name" 2>/dev/null || true)
+    if [ "$state" = "running" ]; then
+        log_info "Stopping $vm_name..."
+        sudo virsh destroy "$vm_name"
+    fi
+
+    log_info "Removing VM $vm_name and its disk..."
+    sudo virsh undefine "$vm_name" --remove-all-storage
+
+    log_info "Removing $vm_name from /etc/hosts..."
+    sudo sed -i "/ ${vm_name}$/d" /etc/hosts
+
+    log_info "Removing $vm_name from ~/.ssh/known_hosts..."
+    ssh-keygen -R "$vm_name" 2>/dev/null || true
+    [ -n "$vm_ip" ] && { ssh-keygen -R "$vm_ip" 2>/dev/null || true; }
+
+    log_info "Done. Config preserved at $conf — run './$(basename "$0") create' to rebuild."
+}
+
 save_config() {
     mkdir -p "$CONFIG_DIR"
     cat > "$CONFIG_FILE" << CONF
@@ -160,6 +211,10 @@ case "$COMMAND" in
         ;;
     list)
         cmd_list
+        exit $?
+        ;;
+    delete)
+        cmd_delete "${2:-}"
         exit $?
         ;;
     create)

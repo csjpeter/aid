@@ -87,6 +87,50 @@ get_network_prefix() {
     fi
 }
 
+print_help() {
+    cat <<EOF
+Usage: $(basename "$0") [COMMAND]
+
+Create and manage KVM-based AI developer VMs.
+
+Commands:
+  create   Interactively collect config, create, and provision a new VM (default)
+  list     List all configured VMs with their IP address and virsh status
+  help     Show this help message
+
+VM naming:
+  Default name follows the pattern ai-dev-vm-N (N starting at 2).
+  The VM IP last octet is derived from N (ai-dev-vm-3 → x.x.x.3).
+  Suffix 1 is forbidden — that address is reserved for the network gateway.
+
+Config files:
+  One file per VM: ~/.config/aid/<vm-name>.conf  (chmod 600)
+
+EOF
+}
+
+cmd_list() {
+    local conf_dir="$HOME/.config/aid"
+    local confs=()
+    if [ -d "$conf_dir" ]; then
+        mapfile -t confs < <(compgen -G "$conf_dir/*.conf" 2>/dev/null || true)
+    fi
+    if [ "${#confs[@]}" -eq 0 ]; then
+        log_info "No VMs configured in $conf_dir."
+        return 0
+    fi
+    printf "%-22s %-18s %s\n" "VM NAME" "IP ADDRESS" "STATUS"
+    printf "%-22s %-18s %s\n" "-------" "----------" "------"
+    local conf VM_NAME VM_IP status
+    for conf in "${confs[@]}"; do
+        VM_NAME="" VM_IP=""
+        # shellcheck disable=SC1090
+        source "$conf"
+        status=$(sudo virsh domstate "$VM_NAME" 2>/dev/null || echo "not found")
+        printf "%-22s %-18s %s\n" "$VM_NAME" "$VM_IP" "$status"
+    done
+}
+
 save_config() {
     mkdir -p "$CONFIG_DIR"
     cat > "$CONFIG_FILE" << CONF
@@ -106,7 +150,28 @@ CONF
     log_info "Config saved: $CONFIG_FILE"
 }
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+# ── Command dispatch ───────────────────────────────────────────────────────────
+
+COMMAND="${1:-create}"
+case "$COMMAND" in
+    help|--help|-h)
+        print_help
+        exit 0
+        ;;
+    list)
+        cmd_list
+        exit $?
+        ;;
+    create)
+        ;;
+    *)
+        log_error "Unknown command: $COMMAND"
+        print_help >&2
+        exit 1
+        ;;
+esac
+
+# ── Main: create ───────────────────────────────────────────────────────────────
 
 log_title "AI Dev VM Creator"
 

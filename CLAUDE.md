@@ -25,6 +25,8 @@ Included as a git submodule at `kvm/`. Always study these before modifying VM cr
 - Default resources: 4 vCPUs, 32G RAM, 200G disk, ubuntu24 image
 - VM IP last octet matches VM name suffix: `ai-dev-vm-3` → `x.x.x.3`; suffix 1 is forbidden (gateway)
 - GitHub authentication uses fine-grained PAT (not classic token)
+- Claude CLI installed via `curl -fsSL https://claude.ai/install.sh | bash` (not npm)
+- GitHub Copilot CLI installed via `curl -fsSL https://gh.io/copilot-install | bash` (not gh extension)
 - Android Studio installed via `snap install android-studio --classic`
 - Qt installed via apt (`qtcreator`, `qt6-base-dev`)
 - GUI apps accessed via SSH X11 forwarding (`ssh -X`)

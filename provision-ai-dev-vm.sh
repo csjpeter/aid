@@ -48,7 +48,7 @@ log "Node.js $(node --version), npm $(npm --version)"
 # ── Claude CLI ─────────────────────────────────────────────────────────────────
 
 log_title "Claude CLI"
-sudo npm install -g @anthropic-ai/claude-code
+curl -fsSL https://claude.ai/install.sh | bash
 log "Claude CLI $(claude --version 2>/dev/null || echo 'installed')"
 
 if [ -n "$CLAUDE_API_KEY" ]; then
@@ -82,12 +82,10 @@ else
     log_warn "No GITHUB_PAT provided — run 'gh auth login' manually"
 fi
 
-# ── GitHub Copilot extension ───────────────────────────────────────────────────
+# ── GitHub Copilot CLI ─────────────────────────────────────────────────────────
 
 log_title "GitHub Copilot CLI"
-gh extension install github/gh-copilot 2>/dev/null \
-    || gh extension upgrade gh-copilot 2>/dev/null \
-    || log_warn "Could not install/upgrade Copilot extension (requires gh auth)"
+curl -fsSL https://gh.io/copilot-install | bash
 log "Copilot: gh copilot suggest / gh copilot explain"
 
 # ── Android Studio ─────────────────────────────────────────────────────────────

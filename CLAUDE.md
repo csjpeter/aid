@@ -13,7 +13,7 @@ Scripts to create and provision KVM-based AI developer VMs (`ai-dev-vm-1`, `ai-d
 - `README.md` — GitHub project documentation
 
 ## KVM utils
-Located at `/home/csjpeter/bin/kvm/`. Always study these before modifying VM creation logic:
+Included as a git submodule at `kvm/`. Always study these before modifying VM creation logic:
 - `kvm-create-vm.sh` — creates VM from cloud image
 - `kvm-import-image.sh` — imports cloud image into libvirt
 - `kvm-net-define.sh` — creates libvirt NAT network

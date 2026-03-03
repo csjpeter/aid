@@ -16,7 +16,7 @@ GUI apps are accessed via SSH X11 forwarding (`ssh -X`).
 
 ## Requirements (on the host machine)
 
-- KVM/libvirt installed — see [kvm-utils](https://github.com/csjpeter/kvm)
+- KVM/libvirt installed — see [kvm-utils](https://github.com/csjpeter/kvm-utils)
 - SSH key pair in `~/.ssh/`
 - `virsh`, `virt-install`, `xorriso`, `cloud-init` available
 
@@ -108,4 +108,15 @@ ssh -X user@<ip> qtcreator
 
 ## Dependencies
 
-Uses scripts from [csjpeter/kvm](https://github.com/csjpeter/kvm), expected at `/home/csjpeter/bin/kvm/`.
+Uses [kvm-utils](https://github.com/csjpeter/kvm-utils) as a git submodule at `kvm/`.
+Clone with submodules:
+
+```bash
+git clone --recurse-submodules https://github.com/csjpeter/aid.git
+```
+
+Or if already cloned:
+
+```bash
+git submodule update --init
+```

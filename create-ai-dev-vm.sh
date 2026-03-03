@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KVM_DIR="/home/csjpeter/bin/kvm"
+KVM_DIR="$SCRIPT_DIR/kvm"
 CONFIG_DIR="$HOME/.config/aid"
 
 source "$KVM_DIR/kvm-include.sh"

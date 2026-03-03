@@ -1,0 +1,3 @@
+[submodule "kvm"]
+	path = kvm
+	url = git@github.com:csjpeter/kvm-utils.git

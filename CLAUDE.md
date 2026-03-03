@@ -23,7 +23,7 @@ Included as a git submodule at `kvm/`. Always study these before modifying VM cr
 ## Design decisions
 - One config file per VM: `~/.config/aid/<vm-name>.conf`, always `chmod 600`
 - Default resources: 4 vCPUs, 32G RAM, 200G disk, ubuntu24 image
-- VM IP last octet matches VM name suffix: `ai-dev-vm-3` → `x.x.x.3`
+- VM IP last octet matches VM name suffix: `ai-dev-vm-3` → `x.x.x.3`; suffix 1 is forbidden (gateway)
 - GitHub authentication uses fine-grained PAT (not classic token)
 - Android Studio installed via `snap install android-studio --classic`
 - Qt installed via apt (`qtcreator`, `qt6-base-dev`)

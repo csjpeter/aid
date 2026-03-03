@@ -61,10 +61,10 @@ choose() {
 
 suggest_vm_name() {
     if ! command -v virsh &>/dev/null && ! sudo virsh --version &>/dev/null 2>&1; then
-        echo "ai-dev-vm-1"
+        echo "ai-dev-vm-2"
         return
     fi
-    local n=1
+    local n=2  # .1 is reserved for the network gateway
     while sudo virsh dominfo "ai-dev-vm-$n" &>/dev/null 2>&1; do
         ((n++))
     done
@@ -72,7 +72,7 @@ suggest_vm_name() {
 }
 
 list_networks() {
-    sudo virsh net-list --all --name 2>/dev/null | grep -v '^$' || echo "default"
+    sudo virsh net-list --all --name 2>/dev/null | grep -v '^$' || true
 }
 
 get_network_prefix() {
@@ -113,6 +113,10 @@ log_title "AI Dev VM Creator"
 # Step 1: VM name
 DEFAULT_NAME=$(suggest_vm_name)
 ask "VM name" "$DEFAULT_NAME" VM_NAME
+if [[ "$VM_NAME" =~ -([0-9]+)$ ]] && [ "${BASH_REMATCH[1]}" -eq 1 ]; then
+    log_error "VM name '$VM_NAME' derives IP .1 which is reserved for the network gateway. Use suffix 2 or higher."
+    exit 1
+fi
 CONFIG_FILE="$CONFIG_DIR/${VM_NAME}.conf"
 
 # Set defaults (overridden by config file if it exists)
@@ -122,7 +126,8 @@ VM_RAM="32G"
 VM_DISK_SIZE="200G"
 VM_ADMIN_USER="$USER"
 KVM_HOST="local"
-LIBVIRT_NETWORK="default"
+LIBVIRT_NETWORK=$(list_networks | head -1)
+LIBVIRT_NETWORK="${LIBVIRT_NETWORK:-default}"
 GITHUB_PAT=""
 CLAUDE_API_KEY=""
 
@@ -183,6 +188,10 @@ else
     DEFAULT_IP="192.168.122.2"
 fi
 ask "VM IP address" "${VM_IP:-$DEFAULT_IP}" VM_IP
+if [[ "$VM_IP" =~ \.1$ ]]; then
+    log_error "IP $VM_IP ends in .1 which is reserved for the network gateway."
+    exit 1
+fi
 
 # Step 8: GitHub PAT
 echo

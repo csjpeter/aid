@@ -45,6 +45,28 @@ if ! command -v node &>/dev/null; then
 fi
 log "Node.js $(node --version), npm $(npm --version)"
 
+# ── Virtiofs shared directories ────────────────────────────────────────────────
+
+log_title "Virtiofs shared directories"
+sudo modprobe virtiofs 2>/dev/null || true
+
+for spec in "claude:$HOME/.claude" "copilot:$HOME/.copilot"; do
+    tag="${spec%%:*}"
+    mp="${spec#*:}"
+    mkdir -p "$mp"
+    if ! grep -qE "^${tag}[[:space:]]" /etc/fstab; then
+        echo "${tag}  ${mp}  virtiofs  defaults  0  0" | sudo tee -a /etc/fstab > /dev/null
+        log "Added fstab entry: ${tag} → ${mp}"
+    fi
+    if mountpoint -q "$mp" 2>/dev/null; then
+        log "$mp already mounted"
+    elif sudo mount -t virtiofs "$tag" "$mp" 2>/dev/null; then
+        log "Mounted ${tag} → ${mp}"
+    else
+        log_warn "Could not mount ${tag} — share may not be attached to this VM"
+    fi
+done
+
 # ── Claude CLI ─────────────────────────────────────────────────────────────────
 
 log_title "Claude CLI"

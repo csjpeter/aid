@@ -378,8 +378,6 @@ fi
 
 # ── Phase 3: Create VM ─────────────────────────────────────────────────────────
 
-log_title "Creating VM: $VM_NAME"
-
 CREATE_ARGS=(
     "$VM_BASE_IMAGE" "$VM_NAME" "$VM_IP"
     "--vcpus=${VM_VCPUS}"
@@ -388,10 +386,64 @@ CREATE_ARGS=(
     "--admin-user=${VM_ADMIN_USER}"
 )
 
-if [ "$KVM_HOST" == "local" ]; then
-    "$KVM_DIR/kvm-create-vm.sh" "${CREATE_ARGS[@]}"
+if sudo virsh dominfo "$VM_NAME" &>/dev/null 2>&1; then
+    log_info "VM $VM_NAME already exists — skipping creation."
 else
-    "$KVM_DIR/kvm-remote.sh" "$KVM_HOST" create "${CREATE_ARGS[@]}"
+    log_title "Creating VM: $VM_NAME"
+    if [ "$KVM_HOST" == "local" ]; then
+        "$KVM_DIR/kvm-create-vm.sh" "${CREATE_ARGS[@]}"
+    else
+        "$KVM_DIR/kvm-remote.sh" "$KVM_HOST" create "${CREATE_ARGS[@]}"
+    fi
+fi
+
+# ── Phase 3.5: Virtiofs shares (local only) ────────────────────────────────────
+
+SHARES_CHANGED=false
+
+if [ "$KVM_HOST" == "local" ]; then
+    log_title "Checking virtiofs shares"
+    mkdir -p "$HOME/.claude" "$HOME/.copilot"
+    INACTIVE_XML=$(sudo virsh dumpxml --inactive "$VM_NAME" 2>/dev/null)
+
+    if echo "$INACTIVE_XML" | grep -q "target dir='claude'"; then
+        log_info "Share 'claude' already configured."
+    else
+        "$KVM_DIR/kvm-share.sh" attach "$VM_NAME" "$HOME/.claude" "claude"
+        SHARES_CHANGED=true
+    fi
+
+    if echo "$INACTIVE_XML" | grep -q "target dir='copilot'"; then
+        log_info "Share 'copilot' already configured."
+    else
+        "$KVM_DIR/kvm-share.sh" attach "$VM_NAME" "$HOME/.copilot" "copilot"
+        SHARES_CHANGED=true
+    fi
+
+    if [ "$SHARES_CHANGED" = "true" ]; then
+        log_info "Restarting VM to activate new virtiofs shares..."
+        sudo virsh shutdown "$VM_NAME" 2>/dev/null || true
+        SHUTDOWN_WAIT=0
+        while [ $SHUTDOWN_WAIT -lt 30 ]; do
+            [ "$(sudo virsh domstate "$VM_NAME" 2>/dev/null)" != "running" ] && break
+            sleep 1
+            SHUTDOWN_WAIT=$((SHUTDOWN_WAIT + 1))
+        done
+        [ "$(sudo virsh domstate "$VM_NAME" 2>/dev/null)" = "running" ] \
+            && sudo virsh destroy "$VM_NAME"
+        sudo virsh start "$VM_NAME"
+
+        log_info "Waiting for SSH after restart (up to 120s)..."
+        SSH_DEADLINE=$(($(date +%s) + 120))
+        while [ "$(date +%s)" -lt "$SSH_DEADLINE" ]; do
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+                    "${VM_ADMIN_USER}@${VM_IP}" true &>/dev/null 2>&1; then
+                log_info "SSH available on ${VM_NAME}."
+                break
+            fi
+            sleep 3
+        done
+    fi
 fi
 
 # ── Phase 4: Provision ─────────────────────────────────────────────────────────

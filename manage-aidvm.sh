@@ -125,7 +125,7 @@ Commands:
   create          Collect config, create, and provision a new VM
   list            List all configured VMs with their IP address and virsh status
   delete          Stop and permanently delete a VM and its disk (config preserved)
-  sync            Push host configs (nvim, claude.json, env) to an existing VM
+  sync            Push host configs (claude.json, env) to an existing VM
   help [command]  Show this help, or detailed help for a command (default)
 
 Use '$(basename "$0") <command> --help' for the same per-command help.
@@ -192,9 +192,10 @@ print_help_sync() {
 Usage: $(basename "$0") sync [vm-name] [OPTIONS]
 
 Push host configs to a running VM without full reprovisioning:
-  - ~/.config/nvim
   - ~/.claude.json
   - Host environment settings (~/.bashrc section)
+
+Note: ~/.config/nvim is shared live via virtiofs and always up to date.
 
 Options:
   --vm-name=<name>   VM to sync (alternative to positional argument)
@@ -326,12 +327,6 @@ scp_host_configs() {
     if [ -f "$HOME/.claude.json" ]; then
         log_info "Copying ~/.claude.json..."
         scp $ssh_opts "$HOME/.claude.json" "${admin_user}@${vm_ip}:~/.claude.json"
-    fi
-
-    if [ -d "$HOME/.config/nvim" ]; then
-        log_info "Copying ~/.config/nvim..."
-        ssh $ssh_opts "${admin_user}@${vm_ip}" "mkdir -p ~/.config"
-        scp -r $ssh_opts "$HOME/.config/nvim" "${admin_user}@${vm_ip}:~/.config/"
     fi
 }
 
@@ -712,7 +707,7 @@ SHARES_CHANGED=false
 
 if [ "$KVM_HOST" == "local" ]; then
     log_title "Checking virtiofs shares"
-    mkdir -p "$HOME/.claude" "$HOME/.copilot"
+    mkdir -p "$HOME/.claude" "$HOME/.copilot" "$HOME/.config/nvim"
     INACTIVE_XML=$(sudo virsh dumpxml --inactive "$VM_NAME" 2>/dev/null)
 
     if echo "$INACTIVE_XML" | grep -q "target dir='claude'"; then
@@ -726,6 +721,13 @@ if [ "$KVM_HOST" == "local" ]; then
         log_info "Share 'copilot' already configured."
     else
         "$KVM_DIR/kvm-share.sh" attach "$VM_NAME" "$HOME/.copilot" "copilot"
+        SHARES_CHANGED=true
+    fi
+
+    if echo "$INACTIVE_XML" | grep -q "target dir='nvim-config'"; then
+        log_info "Share 'nvim-config' already configured."
+    else
+        "$KVM_DIR/kvm-share.sh" attach "$VM_NAME" "$HOME/.config/nvim" "nvim-config"
         SHARES_CHANGED=true
     fi
 

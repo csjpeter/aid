@@ -51,7 +51,7 @@ log "Node.js $(node --version), npm $(npm --version)"
 log_title "Virtiofs shared directories"
 sudo modprobe virtiofs 2>/dev/null || true
 
-for spec in "claude:$HOME/.claude" "copilot:$HOME/.copilot"; do
+for spec in "claude:$HOME/.claude" "copilot:$HOME/.copilot" "nvim-config:$HOME/.config/nvim"; do
     tag="${spec%%:*}"
     mp="${spec#*:}"
     mkdir -p "$mp"

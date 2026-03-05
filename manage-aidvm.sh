@@ -895,7 +895,7 @@ if ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
     log_info "To provision manually from a host that can reach the VM:"
     echo "  scp $PROVISION_SCRIPT ${VM_ADMIN_USER}@${VM_IP}:/tmp/"
     echo "  ssh ${VM_ADMIN_USER}@${VM_IP} \\"
-    echo "    \"GITHUB_PAT='\${GITHUB_PAT}' CLAUDE_API_KEY='\${CLAUDE_API_KEY}' bash /tmp/provision-aidvm.sh\""
+    echo "    \"GITHUB_PAT='\${GITHUB_PAT}' CLAUDE_API_KEY='\${CLAUDE_API_KEY}' bash /tmp/provision-aidvm.sh run\""
     echo
     log_info "Config is saved at: $CONFIG_FILE"
 else
@@ -910,7 +910,7 @@ else
     log_info "Running provisioning (may take 10-20 minutes)..."
     ssh -o StrictHostKeyChecking=no \
         "${VM_ADMIN_USER}@${VM_IP}" \
-        "GITHUB_PAT='${GITHUB_PAT}' CLAUDE_API_KEY='${CLAUDE_API_KEY}' bash /tmp/provision-aidvm.sh"
+        "GITHUB_PAT='${GITHUB_PAT}' CLAUDE_API_KEY='${CLAUDE_API_KEY}' bash /tmp/provision-aidvm.sh run"
 
     log_title "VM $VM_NAME is ready!"
     log_info "Connect:        ssh ${VM_ADMIN_USER}@${VM_IP}"

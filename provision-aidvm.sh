@@ -22,6 +22,7 @@ log_title "Common dev tools"
 sudo apt-get install -y \
     git \
     vim \
+    neovim \
     tmux \
     curl \
     wget \
@@ -171,6 +172,33 @@ fi
 sudo systemctl restart ssh
 log "X11 forwarding enabled. Connect with: ssh -X user@ip"
 
+# ── Bashrc settings ────────────────────────────────────────────────────────────
+
+log_title "Bashrc settings"
+
+AID_MARKER="# >>> aid provision begin <<<"
+if grep -q "$AID_MARKER" "$HOME/.bashrc" 2>/dev/null; then
+    log "Bashrc settings already present — skipping."
+else
+    {
+        echo ""
+        echo "# >>> aid provision begin <<<"
+
+        echo '# PATH'
+        echo '[ -d "$HOME/bin" ]        && [[ ":$PATH:" != *":$HOME/bin:"*        ]] && export PATH="$HOME/bin:$PATH"'
+        echo '[ -d "$HOME/.local/bin" ] && [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin:$PATH"'
+
+        if [ -f /tmp/aid-env.sh ]; then
+            echo ""
+            echo "# Host environment"
+            cat /tmp/aid-env.sh
+        fi
+
+        echo "# >>> aid provision end <<<"
+    } >> "$HOME/.bashrc"
+    log "Bashrc settings applied."
+fi
+
 # ── Cleanup ────────────────────────────────────────────────────────────────────
 
 log_title "Cleanup"
@@ -182,7 +210,7 @@ sudo apt-get clean
 log_title "Provisioning complete!"
 echo
 log "Installed tools:"
-log "  - git, vim, tmux, curl, build-essential, cmake, python3"
+log "  - git, vim, neovim, tmux, curl, build-essential, cmake, python3"
 log "  - Node.js $(node --version)"
 log "  - Claude CLI  →  claude"
 log "  - GitHub CLI  →  gh"

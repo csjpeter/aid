@@ -691,6 +691,17 @@ else
         "$PROVISION_SCRIPT" \
         "${VM_ADMIN_USER}@${VM_IP}:/tmp/provision-aidvm.sh"
 
+    log_info "Collecting host environment settings..."
+    _env_tmp=$(mktemp /tmp/aid-env-XXXXXX.sh)
+    {
+        for _var in PS1 NAME EMAIL DEBFULLNAME DEBEMAIL VISUAL XEDITOR EDITOR ANDROID_HOME; do
+            _val="${!_var:-}"
+            [ -n "$_val" ] && printf 'export %s=%s\n' "$_var" "$(printf '%q' "$_val")"
+        done
+    } > "$_env_tmp"
+    scp -o StrictHostKeyChecking=no "$_env_tmp" "${VM_ADMIN_USER}@${VM_IP}:/tmp/aid-env.sh"
+    rm -f "$_env_tmp"
+
     log_info "Running provisioning (may take 10-20 minutes)..."
     ssh -o StrictHostKeyChecking=no \
         "${VM_ADMIN_USER}@${VM_IP}" \

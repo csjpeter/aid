@@ -60,7 +60,9 @@ Provisioning steps:
    8. Android Studio         snap install android-studio --classic
    9. Qt & Qt Creator        apt: qtcreator qt6-base-dev
   10. SSH X11 forwarding     sshd_config: X11Forwarding yes, X11UseLocalhost no
-  11. Bashrc settings        PATH (~/bin ~/.local/bin) + host env from /tmp/aid-env.sh
+  11. Bashrc settings        PATH (~/bin, ~/.local/bin) + host environment variables
+                             (PS1, NAME, EMAIL, DEBFULLNAME, DEBEMAIL,
+                              VISUAL, XEDITOR, EDITOR, ANDROID_HOME)
   12. Cleanup                apt autoremove + clean
 
 EOF

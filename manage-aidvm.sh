@@ -714,6 +714,15 @@ else
             "${VM_ADMIN_USER}@${VM_IP}:~/.claude.json"
     fi
 
+    if [ -d "$HOME/.config/nvim" ]; then
+        log_info "Copying ~/.config/nvim to VM..."
+        ssh -o StrictHostKeyChecking=no "${VM_ADMIN_USER}@${VM_IP}" \
+            "mkdir -p ~/.config"
+        scp -r -o StrictHostKeyChecking=no \
+            "$HOME/.config/nvim" \
+            "${VM_ADMIN_USER}@${VM_IP}:~/.config/"
+    fi
+
     log_title "VM $VM_NAME is ready!"
     log_info "Connect:        ssh ${VM_ADMIN_USER}@${VM_IP}"
     log_info "GUI via X11:    ssh -X ${VM_ADMIN_USER}@${VM_IP} android-studio"

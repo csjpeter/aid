@@ -122,10 +122,10 @@ Usage: $(basename "$0") <command> [OPTIONS]
 Manage KVM-based AI developer VMs.
 
 Commands:
-  create   Collect config, create, and provision a new VM (default)
+  create   Collect config, create, and provision a new VM
   list     List all configured VMs with their IP address and virsh status
   delete   Stop and permanently delete a VM and its disk (config preserved)
-  help     Show this help message
+  help     Show this help message (default)
 
 Run '$(basename "$0") help <command>' or '$(basename "$0") <command> --help'
 for detailed help on a specific command.
@@ -354,7 +354,7 @@ done
 
 # ── Command dispatch ───────────────────────────────────────────────────────────
 
-COMMAND="${POSITIONAL[0]:-create}"
+COMMAND="${POSITIONAL[0]:-help}"
 COMMAND_EXPLICIT="${POSITIONAL[0]:+true}"
 COMMAND_EXPLICIT="${COMMAND_EXPLICIT:-false}"
 

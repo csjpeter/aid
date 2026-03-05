@@ -7,18 +7,40 @@ CONFIG_DIR="$HOME/.config/aid"
 
 source "$KVM_DIR/kvm-include.sh"
 
+# ── CLI option defaults ─────────────────────────────────────────────────────────
+
+BATCH=false
+CLI_VM_NAME=""
+CLI_BASE_IMAGE=""
+CLI_VCPUS=""
+CLI_RAM=""
+CLI_DISK_SIZE=""
+CLI_ADMIN_USER=""
+CLI_KVM_HOST=""
+CLI_NETWORK=""
+CLI_NETWORK_CIDR=""
+CLI_IP=""
+CLI_GITHUB_PAT=""
+CLI_CLAUDE_API_KEY=""
+
 # ── Prompt helpers ─────────────────────────────────────────────────────────────
 
+# ask <msg> <default> <varname> [cli_val]
+# Skips prompt when BATCH=true or cli_val is non-empty; just logs the value.
 ask() {
-    # ask <message> <default> <varname>
-    local msg="$1" default="$2" varname="$3"
+    local msg="$1" default="$2" varname="$3" cli_val="${4:-}"
+    if [ "$BATCH" = "true" ] || [ -n "$cli_val" ]; then
+        printf -v "$varname" '%s' "$default"
+        log_info "$msg: $default"
+        return
+    fi
     local input
     read -rp "$(echo -e "${GREEN}?${NC} $msg [${default}]: ")" input
     printf -v "$varname" '%s' "${input:-$default}"
 }
 
 ask_optional() {
-    # ask_optional <message> <varname>  — empty default, no brackets shown
+    # ask_optional <msg> <varname>  — empty default, no brackets shown
     local msg="$1" varname="$2"
     local input
     read -rp "$(echo -e "${GREEN}?${NC} $msg: ")" input
@@ -26,7 +48,7 @@ ask_optional() {
 }
 
 ask_secret() {
-    # ask_secret <message> <varname>
+    # ask_secret <msg> <varname>
     local msg="$1" varname="$2"
     local input
     read -rsp "$(echo -e "${GREEN}?${NC} $msg: ")" input
@@ -34,11 +56,17 @@ ask_secret() {
     printf -v "$varname" '%s' "$input"
 }
 
+# choose <msg> <default> <varname> <cli_val> <option1> [option2 ...]
+# Skips prompt when BATCH=true or cli_val is non-empty; just logs the value.
 choose() {
-    # choose <message> <default> <varname> <option1> [<option2> ...]
-    local msg="$1" default="$2" varname="$3"
-    shift 3
+    local msg="$1" default="$2" varname="$3" cli_val="${4:-}"
+    shift 4
     local options=("$@")
+    if [ "$BATCH" = "true" ] || [ -n "$cli_val" ]; then
+        printf -v "$varname" '%s' "$default"
+        log_info "$msg: $default"
+        return
+    fi
     echo -e "${GREEN}?${NC} $msg"
     local i
     for i in "${!options[@]}"; do
@@ -89,15 +117,34 @@ get_network_prefix() {
 
 print_help() {
     cat <<EOF
-Usage: $(basename "$0") [COMMAND]
+Usage: $(basename "$0") [COMMAND] [OPTIONS]
 
 Create and manage KVM-based AI developer VMs.
 
 Commands:
-  create          Interactively collect config, create, and provision a new VM (default)
+  create          Collect config, create, and provision a new VM (default)
   list            List all configured VMs with their IP address and virsh status
   delete [name]   Stop and permanently delete a VM and its disk (config preserved)
   help            Show this help message
+
+Options (create):
+  --vm-name=<name>          VM name (default: ai-dev-vm-N, N≥2)
+  --base-image=<image>      Base OS image (default: ubuntu24)
+  --vcpus=<n>               Number of vCPUs (default: 4)
+  --ram=<size>              RAM, e.g. 32G (default: 32G)
+  --disk-size=<size>        Disk size, e.g. 200G (default: 200G)
+  --admin-user=<user>       Admin username on the VM (default: \$USER)
+  --kvm-host=<host>         'local' or remote hostname (default: local)
+  --network=<name>          Libvirt network name (default: first available)
+  --network-cidr=<cidr>     Create network with this CIDR if it doesn't exist
+  --ip=<ip>                 VM IP address (default: derived from VM name suffix)
+  --github-pat=<token>      GitHub fine-grained PAT for gh auth
+  --claude-api-key=<key>    Anthropic API key written to ~/.bashrc on the VM
+  --batch                   Non-interactive: use defaults/config/CLI values only
+
+Options (delete):
+  --vm-name=<name>          VM to delete (alternative to positional argument)
+  --batch                   Skip confirmation prompt
 
 VM naming:
   Default name follows the pattern ai-dev-vm-N (N starting at 2).
@@ -106,9 +153,19 @@ VM naming:
 
 Config files:
   One file per VM: ~/.config/aid/<vm-name>.conf  (chmod 600)
+  CLI options override saved config values. Config is saved after each run.
+
+Examples:
+  $(basename "$0") create
+  $(basename "$0") create --vm-name=ai-dev-vm-3 --vcpus=8 --ram=64G --batch
+  $(basename "$0") list
+  $(basename "$0") delete ai-dev-vm-2
+  $(basename "$0") delete --vm-name=ai-dev-vm-2 --batch
 
 EOF
 }
+
+# ── Sub-commands ───────────────────────────────────────────────────────────────
 
 cmd_list() {
     local conf_dir="$HOME/.config/aid"
@@ -134,8 +191,13 @@ cmd_list() {
 
 cmd_delete() {
     local vm_name="${1:-}"
+    local batch="${2:-false}"
 
     if [ -z "$vm_name" ]; then
+        if [ "$batch" = "true" ]; then
+            log_error "No VM name specified. Use --vm-name=<name> or pass as argument."
+            exit 1
+        fi
         cmd_list
         echo
         ask_optional "VM name to delete" vm_name
@@ -150,12 +212,16 @@ cmd_delete() {
         exit 1
     fi
 
-    log_warning "This will permanently delete VM '$vm_name' and its disk image."
-    local confirm
-    read -rp "$(echo -e "${YELLOW}?${NC} Type the VM name to confirm: ")" confirm
-    if [ "$confirm" != "$vm_name" ]; then
-        log_info "Aborted."
-        exit 0
+    if [ "$batch" = "true" ]; then
+        log_warning "Deleting VM '$vm_name' and its disk image (--batch)."
+    else
+        log_warning "This will permanently delete VM '$vm_name' and its disk image."
+        local confirm
+        read -rp "$(echo -e "${YELLOW}?${NC} Type the VM name to confirm: ")" confirm
+        if [ "$confirm" != "$vm_name" ]; then
+            log_info "Aborted."
+            exit 0
+        fi
     fi
 
     local vm_ip=""
@@ -201,9 +267,52 @@ CONF
     log_info "Config saved: $CONFIG_FILE"
 }
 
+# ── Option parsing ─────────────────────────────────────────────────────────────
+
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --batch)              BATCH=true ;;
+        --vm-name=*)          CLI_VM_NAME="${1#*=}" ;;
+        --vm-name)            CLI_VM_NAME="$2"; shift ;;
+        --base-image=*)       CLI_BASE_IMAGE="${1#*=}" ;;
+        --base-image)         CLI_BASE_IMAGE="$2"; shift ;;
+        --vcpus=*)            CLI_VCPUS="${1#*=}" ;;
+        --vcpus)              CLI_VCPUS="$2"; shift ;;
+        --ram=*)              CLI_RAM="${1#*=}" ;;
+        --ram)                CLI_RAM="$2"; shift ;;
+        --disk-size=*)        CLI_DISK_SIZE="${1#*=}" ;;
+        --disk-size)          CLI_DISK_SIZE="$2"; shift ;;
+        --admin-user=*)       CLI_ADMIN_USER="${1#*=}" ;;
+        --admin-user)         CLI_ADMIN_USER="$2"; shift ;;
+        --kvm-host=*)         CLI_KVM_HOST="${1#*=}" ;;
+        --kvm-host)           CLI_KVM_HOST="$2"; shift ;;
+        --network=*)          CLI_NETWORK="${1#*=}" ;;
+        --network)            CLI_NETWORK="$2"; shift ;;
+        --network-cidr=*)     CLI_NETWORK_CIDR="${1#*=}" ;;
+        --network-cidr)       CLI_NETWORK_CIDR="$2"; shift ;;
+        --ip=*)               CLI_IP="${1#*=}" ;;
+        --ip)                 CLI_IP="$2"; shift ;;
+        --github-pat=*)       CLI_GITHUB_PAT="${1#*=}" ;;
+        --github-pat)         CLI_GITHUB_PAT="$2"; shift ;;
+        --claude-api-key=*)   CLI_CLAUDE_API_KEY="${1#*=}" ;;
+        --claude-api-key)     CLI_CLAUDE_API_KEY="$2"; shift ;;
+        -*)
+            log_error "Unknown option: $1"
+            print_help >&2
+            exit 1
+            ;;
+        *)
+            POSITIONAL+=("$1")
+            ;;
+    esac
+    shift
+done
+
 # ── Command dispatch ───────────────────────────────────────────────────────────
 
-COMMAND="${1:-create}"
+COMMAND="${POSITIONAL[0]:-create}"
+
 case "$COMMAND" in
     help|--help|-h)
         print_help
@@ -214,7 +323,8 @@ case "$COMMAND" in
         exit $?
         ;;
     delete)
-        cmd_delete "${2:-}"
+        DELETE_VM_NAME="${CLI_VM_NAME:-${POSITIONAL[1]:-}}"
+        cmd_delete "$DELETE_VM_NAME" "$BATCH"
         exit $?
         ;;
     create)
@@ -230,9 +340,18 @@ esac
 
 log_title "AI Dev VM Creator"
 
-# Step 1: VM name
+# Step 1: VM name (needed before config load — determines which config to load)
 DEFAULT_NAME=$(suggest_vm_name)
-ask "VM name" "$DEFAULT_NAME" VM_NAME
+if [ -n "$CLI_VM_NAME" ]; then
+    VM_NAME="$CLI_VM_NAME"
+    log_info "VM name: $VM_NAME"
+elif [ "$BATCH" = "true" ]; then
+    VM_NAME="$DEFAULT_NAME"
+    log_info "VM name: $VM_NAME"
+else
+    ask "VM name" "$DEFAULT_NAME" VM_NAME
+fi
+
 if [[ "$VM_NAME" =~ -([0-9]+)$ ]] && [ "${BASH_REMATCH[1]}" -eq 1 ]; then
     log_error "VM name '$VM_NAME' derives IP .1 which is reserved for the network gateway. Use suffix 2 or higher."
     exit 1
@@ -248,6 +367,7 @@ VM_ADMIN_USER="$USER"
 KVM_HOST="local"
 LIBVIRT_NETWORK=$(list_networks | head -1)
 LIBVIRT_NETWORK="${LIBVIRT_NETWORK:-default}"
+VM_IP=""
 GITHUB_PAT=""
 CLAUDE_API_KEY=""
 
@@ -255,39 +375,68 @@ if [ -f "$CONFIG_FILE" ]; then
     log_info "Existing config found: $CONFIG_FILE — loading values"
     # shellcheck disable=SC1090
     source "$CONFIG_FILE"
-    log_info "Press Enter at each prompt to keep current value."
+    [ "$BATCH" = "false" ] && log_info "Press Enter at each prompt to keep current value."
 fi
+
+# Apply CLI overrides (take precedence over saved config)
+[ -n "$CLI_BASE_IMAGE" ]     && VM_BASE_IMAGE="$CLI_BASE_IMAGE"
+[ -n "$CLI_VCPUS" ]          && VM_VCPUS="$CLI_VCPUS"
+[ -n "$CLI_RAM" ]            && VM_RAM="$CLI_RAM"
+[ -n "$CLI_DISK_SIZE" ]      && VM_DISK_SIZE="$CLI_DISK_SIZE"
+[ -n "$CLI_ADMIN_USER" ]     && VM_ADMIN_USER="$CLI_ADMIN_USER"
+[ -n "$CLI_KVM_HOST" ]       && KVM_HOST="$CLI_KVM_HOST"
+[ -n "$CLI_NETWORK" ]        && LIBVIRT_NETWORK="$CLI_NETWORK"
+[ -n "$CLI_IP" ]             && VM_IP="$CLI_IP"
+[ -n "$CLI_GITHUB_PAT" ]     && GITHUB_PAT="$CLI_GITHUB_PAT"
+[ -n "$CLI_CLAUDE_API_KEY" ] && CLAUDE_API_KEY="$CLI_CLAUDE_API_KEY"
 
 echo
 
 # Step 2: Base OS image
-choose "Base OS image" "$VM_BASE_IMAGE" VM_BASE_IMAGE \
+choose "Base OS image" "$VM_BASE_IMAGE" VM_BASE_IMAGE "$CLI_BASE_IMAGE" \
     ubuntu24 ubuntu22 ubuntu20 rocky9 debian12
 
 # Step 3: Resources
-ask "vCPUs" "$VM_VCPUS" VM_VCPUS
-ask "RAM (e.g. 32G)" "$VM_RAM" VM_RAM
+ask "vCPUs" "$VM_VCPUS" VM_VCPUS "$CLI_VCPUS"
+ask "RAM (e.g. 32G)" "$VM_RAM" VM_RAM "$CLI_RAM"
 [[ "$VM_RAM" =~ ^[0-9]+$ ]] && VM_RAM="${VM_RAM}G"
-ask "Disk size (e.g. 200G)" "$VM_DISK_SIZE" VM_DISK_SIZE
+ask "Disk size (e.g. 200G)" "$VM_DISK_SIZE" VM_DISK_SIZE "$CLI_DISK_SIZE"
 [[ "$VM_DISK_SIZE" =~ ^[0-9]+$ ]] && VM_DISK_SIZE="${VM_DISK_SIZE}G"
 
 # Step 4: Admin user
-ask "Admin username on VM" "$VM_ADMIN_USER" VM_ADMIN_USER
+ask "Admin username on VM" "$VM_ADMIN_USER" VM_ADMIN_USER "$CLI_ADMIN_USER"
 
 # Step 5: KVM host
-ask "KVM host ('local' or remote hostname)" "$KVM_HOST" KVM_HOST
+ask "KVM host ('local' or remote hostname)" "$KVM_HOST" KVM_HOST "$CLI_KVM_HOST"
 
 # Step 6: Libvirt network
-echo
-log_info "Available libvirt networks:"
-list_networks | while read -r n; do [ -n "$n" ] && echo "  - $n"; done
-echo "  (enter 'new' to create a new network)"
-ask "Libvirt network name" "$LIBVIRT_NETWORK" LIBVIRT_NETWORK
+if [ -n "$CLI_NETWORK" ] || [ "$BATCH" = "true" ]; then
+    log_info "Libvirt network: $LIBVIRT_NETWORK"
+else
+    echo
+    log_info "Available libvirt networks:"
+    list_networks | while read -r n; do [ -n "$n" ] && echo "  - $n"; done
+    echo "  (enter 'new' to create a new network)"
+    ask "Libvirt network name" "$LIBVIRT_NETWORK" LIBVIRT_NETWORK
+fi
 
 NET_CIDR=""
 if [ "$LIBVIRT_NETWORK" == "new" ]; then
+    if [ "$BATCH" = "true" ]; then
+        log_error "Cannot use 'new' network in batch mode. Specify an actual network name with --network=<name>."
+        exit 1
+    fi
     ask "New network name" "kvmnet1" LIBVIRT_NETWORK
-    ask "Network CIDR (e.g. 192.168.100.0/24)" "192.168.100.0/24" NET_CIDR
+    ask "Network CIDR (e.g. 192.168.100.0/24)" "192.168.100.0/24" NET_CIDR "$CLI_NETWORK_CIDR"
+    log_info "Creating network $LIBVIRT_NETWORK ($NET_CIDR)..."
+    if [ "$KVM_HOST" == "local" ]; then
+        "$KVM_DIR/kvm-net-define.sh" "$LIBVIRT_NETWORK" "$NET_CIDR"
+    else
+        "$KVM_DIR/kvm-remote.sh" "$KVM_HOST" net define "$LIBVIRT_NETWORK" "$NET_CIDR"
+    fi
+elif [ -n "$CLI_NETWORK_CIDR" ] && ! sudo virsh net-info "$LIBVIRT_NETWORK" &>/dev/null 2>&1; then
+    # CLI mode: network doesn't exist yet and CIDR provided → create it
+    NET_CIDR="$CLI_NETWORK_CIDR"
     log_info "Creating network $LIBVIRT_NETWORK ($NET_CIDR)..."
     if [ "$KVM_HOST" == "local" ]; then
         "$KVM_DIR/kvm-net-define.sh" "$LIBVIRT_NETWORK" "$NET_CIDR"
@@ -309,44 +458,52 @@ elif [ -n "$NET_PREFIX" ]; then
 else
     DEFAULT_IP="192.168.122.2"
 fi
-ask "VM IP address" "${VM_IP:-$DEFAULT_IP}" VM_IP
+ask "VM IP address" "${VM_IP:-$DEFAULT_IP}" VM_IP "$CLI_IP"
 if [[ "$VM_IP" =~ \.1$ ]]; then
     log_error "IP $VM_IP ends in .1 which is reserved for the network gateway."
     exit 1
 fi
 
 # Step 8: GitHub PAT
-echo
-echo -e "${YELLOW}┌─ Creating a GitHub Personal Access Token (PAT) ───────────────────────────┐${NC}"
-echo -e "${YELLOW}│${NC} 1. Go to:  https://github.com/settings/tokens?type=beta"
-echo -e "${YELLOW}│${NC} 2. Click \"Generate new token\""
-echo -e "${YELLOW}│${NC} 3. Token name: e.g. \"${VM_NAME}\""
-echo -e "${YELLOW}│${NC} 4. Set Expiration as desired"
-echo -e "${YELLOW}│${NC} 5. Repository access → \"Only select repositories\""
-echo -e "${YELLOW}│${NC}    Add only the repos this VM needs access to"
-echo -e "${YELLOW}│${NC} 6. Repository permissions:"
-echo -e "${YELLOW}│${NC}      Contents:      Read and write  (clone, push, pull)"
-echo -e "${YELLOW}│${NC}      Pull requests: Read and write  (if needed)"
-echo -e "${YELLOW}│${NC}      Metadata:      Read-only       (required)"
-echo -e "${YELLOW}│${NC} 7. Account permissions:"
-echo -e "${YELLOW}│${NC}      GitHub Copilot: Read-only      (for Copilot CLI)"
-echo -e "${YELLOW}│${NC} 8. Click \"Generate token\" — copy it now, won't be shown again!"
-echo -e "${YELLOW}└───────────────────────────────────────────────────────────────────────────┘${NC}"
-echo
-if [ -n "$GITHUB_PAT" ]; then
-    log_info "GitHub PAT already set. Leave blank to keep current value."
+if [ -n "$CLI_GITHUB_PAT" ] || [ "$BATCH" = "true" ]; then
+    log_info "GitHub PAT: ${GITHUB_PAT:+(set)}"
+else
+    echo
+    echo -e "${YELLOW}┌─ Creating a GitHub Personal Access Token (PAT) ───────────────────────────┐${NC}"
+    echo -e "${YELLOW}│${NC} 1. Go to:  https://github.com/settings/tokens?type=beta"
+    echo -e "${YELLOW}│${NC} 2. Click \"Generate new token\""
+    echo -e "${YELLOW}│${NC} 3. Token name: e.g. \"${VM_NAME}\""
+    echo -e "${YELLOW}│${NC} 4. Set Expiration as desired"
+    echo -e "${YELLOW}│${NC} 5. Repository access → \"Only select repositories\""
+    echo -e "${YELLOW}│${NC}    Add only the repos this VM needs access to"
+    echo -e "${YELLOW}│${NC} 6. Repository permissions:"
+    echo -e "${YELLOW}│${NC}      Contents:      Read and write  (clone, push, pull)"
+    echo -e "${YELLOW}│${NC}      Pull requests: Read and write  (if needed)"
+    echo -e "${YELLOW}│${NC}      Metadata:      Read-only       (required)"
+    echo -e "${YELLOW}│${NC} 7. Account permissions:"
+    echo -e "${YELLOW}│${NC}      GitHub Copilot: Read-only      (for Copilot CLI)"
+    echo -e "${YELLOW}│${NC} 8. Click \"Generate token\" — copy it now, won't be shown again!"
+    echo -e "${YELLOW}└───────────────────────────────────────────────────────────────────────────┘${NC}"
+    echo
+    if [ -n "$GITHUB_PAT" ]; then
+        log_info "GitHub PAT already set. Leave blank to keep current value."
+    fi
+    ask_secret "GitHub PAT (Enter to keep existing)" GITHUB_PAT_INPUT
+    [ -n "$GITHUB_PAT_INPUT" ] && GITHUB_PAT="$GITHUB_PAT_INPUT"
 fi
-ask_secret "GitHub PAT (Enter to keep existing)" GITHUB_PAT_INPUT
-[ -n "$GITHUB_PAT_INPUT" ] && GITHUB_PAT="$GITHUB_PAT_INPUT"
 
 # Step 9: Claude API key
-echo
-echo -e "${YELLOW}  Claude API keys: https://console.anthropic.com/settings/keys${NC}"
-if [ -n "$CLAUDE_API_KEY" ]; then
-    log_info "Claude API key already set. Leave blank to keep current value."
+if [ -n "$CLI_CLAUDE_API_KEY" ] || [ "$BATCH" = "true" ]; then
+    log_info "Claude API key: ${CLAUDE_API_KEY:+(set)}"
+else
+    echo
+    echo -e "${YELLOW}  Claude API keys: https://console.anthropic.com/settings/keys${NC}"
+    if [ -n "$CLAUDE_API_KEY" ]; then
+        log_info "Claude API key already set. Leave blank to keep current value."
+    fi
+    ask_secret "Claude API key (Enter to keep existing)" CLAUDE_API_KEY_INPUT
+    [ -n "$CLAUDE_API_KEY_INPUT" ] && CLAUDE_API_KEY="$CLAUDE_API_KEY_INPUT"
 fi
-ask_secret "Claude API key (Enter to keep existing)" CLAUDE_API_KEY_INPUT
-[ -n "$CLAUDE_API_KEY_INPUT" ] && CLAUDE_API_KEY="$CLAUDE_API_KEY_INPUT"
 
 # Save config
 save_config
@@ -370,8 +527,12 @@ fi
 
 if ping -c1 -W1 "$VM_IP" &>/dev/null 2>&1; then
     log_warning "IP $VM_IP is already responding to ping."
-    read -rp "$(echo -e "${YELLOW}?${NC} Continue anyway? [y/N]: ")" ans
-    [[ "${ans:-N}" =~ ^[Yy] ]] || { log_error "Aborted."; exit 1; }
+    if [ "$BATCH" = "true" ]; then
+        log_info "Continuing in batch mode..."
+    else
+        read -rp "$(echo -e "${YELLOW}?${NC} Continue anyway? [y/N]: ")" ans
+        [[ "${ans:-N}" =~ ^[Yy] ]] || { log_error "Aborted."; exit 1; }
+    fi
 else
     log_info "IP $VM_IP: available"
 fi

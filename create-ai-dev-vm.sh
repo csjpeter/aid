@@ -115,51 +115,92 @@ get_network_prefix() {
     fi
 }
 
-print_help() {
+print_help_main() {
     cat <<EOF
-Usage: $(basename "$0") [COMMAND] [OPTIONS]
+Usage: $(basename "$0") <command> [OPTIONS]
 
-Create and manage KVM-based AI developer VMs.
+Manage KVM-based AI developer VMs.
 
 Commands:
-  create          Collect config, create, and provision a new VM (default)
-  list            List all configured VMs with their IP address and virsh status
-  delete [name]   Stop and permanently delete a VM and its disk (config preserved)
-  help            Show this help message
+  create   Collect config, create, and provision a new VM (default)
+  list     List all configured VMs with their IP address and virsh status
+  delete   Stop and permanently delete a VM and its disk (config preserved)
+  help     Show this help message
 
-Options (create):
+Run '$(basename "$0") help <command>' or '$(basename "$0") <command> --help'
+for detailed help on a specific command.
+
+EOF
+}
+
+print_help_create() {
+    cat <<EOF
+Usage: $(basename "$0") create [OPTIONS]
+
+Collect config, create, and provision a new AI dev VM.
+If a saved config exists for the VM name it is loaded as defaults.
+CLI options override saved config. Config is updated on each run.
+
+Options:
   --vm-name=<name>          VM name (default: ai-dev-vm-N, N≥2)
-  --base-image=<image>      Base OS image (default: ubuntu24)
+  --base-image=<image>      Base OS image: ubuntu24 ubuntu22 ubuntu20 rocky9 debian12
+                              (default: ubuntu24)
   --vcpus=<n>               Number of vCPUs (default: 4)
   --ram=<size>              RAM, e.g. 32G (default: 32G)
   --disk-size=<size>        Disk size, e.g. 200G (default: 200G)
   --admin-user=<user>       Admin username on the VM (default: \$USER)
   --kvm-host=<host>         'local' or remote hostname (default: local)
   --network=<name>          Libvirt network name (default: first available)
-  --network-cidr=<cidr>     Create network with this CIDR if it doesn't exist
+  --network-cidr=<cidr>     Create network with this CIDR if it doesn't exist yet
   --ip=<ip>                 VM IP address (default: derived from VM name suffix)
   --github-pat=<token>      GitHub fine-grained PAT for gh auth
   --claude-api-key=<key>    Anthropic API key written to ~/.bashrc on the VM
   --batch                   Non-interactive: use defaults/config/CLI values only
 
-Options (delete):
-  --vm-name=<name>          VM to delete (alternative to positional argument)
-  --batch                   Skip confirmation prompt
-
 VM naming:
   Default name follows the pattern ai-dev-vm-N (N starting at 2).
   The VM IP last octet is derived from N (ai-dev-vm-3 → x.x.x.3).
-  Suffix 1 is forbidden — that address is reserved for the network gateway.
+  Suffix 1 is forbidden — reserved for the network gateway.
 
-Config files:
-  One file per VM: ~/.config/aid/<vm-name>.conf  (chmod 600)
-  CLI options override saved config values. Config is saved after each run.
+Config:
+  Saved to ~/.config/aid/<vm-name>.conf (chmod 600).
 
 Examples:
   $(basename "$0") create
-  $(basename "$0") create --vm-name=ai-dev-vm-3 --vcpus=8 --ram=64G --batch
+  $(basename "$0") create --vm-name=ai-dev-vm-3 --vcpus=8 --ram=64G
+  $(basename "$0") create --batch --vm-name=ai-dev-vm-3 \\
+      --network=net100 --ip=192.168.100.3 --github-pat=<token>
+
+EOF
+}
+
+print_help_list() {
+    cat <<EOF
+Usage: $(basename "$0") list
+
+List all VMs configured in ~/.config/aid/ with their IP address
+and current virsh status.
+
+Examples:
   $(basename "$0") list
+
+EOF
+}
+
+print_help_delete() {
+    cat <<EOF
+Usage: $(basename "$0") delete [vm-name] [OPTIONS]
+
+Stop and permanently delete a VM and its disk image.
+The config file (~/.config/aid/<vm-name>.conf) is preserved.
+
+Options:
+  --vm-name=<name>   VM to delete (alternative to positional argument)
+  --batch            Skip the confirmation prompt
+
+Examples:
   $(basename "$0") delete ai-dev-vm-2
+  $(basename "$0") delete --vm-name=ai-dev-vm-2
   $(basename "$0") delete --vm-name=ai-dev-vm-2 --batch
 
 EOF
@@ -269,9 +310,11 @@ CONF
 
 # ── Option parsing ─────────────────────────────────────────────────────────────
 
+SHOW_HELP=false
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --help|-h)            SHOW_HELP=true ;;
         --batch)              BATCH=true ;;
         --vm-name=*)          CLI_VM_NAME="${1#*=}" ;;
         --vm-name)            CLI_VM_NAME="$2"; shift ;;
@@ -299,7 +342,7 @@ while [[ $# -gt 0 ]]; do
         --claude-api-key)     CLI_CLAUDE_API_KEY="$2"; shift ;;
         -*)
             log_error "Unknown option: $1"
-            print_help >&2
+            print_help_main >&2
             exit 1
             ;;
         *)
@@ -312,10 +355,29 @@ done
 # ── Command dispatch ───────────────────────────────────────────────────────────
 
 COMMAND="${POSITIONAL[0]:-create}"
+COMMAND_EXPLICIT="${POSITIONAL[0]:+true}"
+COMMAND_EXPLICIT="${COMMAND_EXPLICIT:-false}"
+
+# --help / -h: show command-specific help if a command was given, else main help
+if [ "$SHOW_HELP" = "true" ]; then
+    case "$COMMAND_EXPLICIT-$COMMAND" in
+        true-create) print_help_create ;;
+        true-list)   print_help_list ;;
+        true-delete) print_help_delete ;;
+        *)           print_help_main ;;
+    esac
+    exit 0
+fi
 
 case "$COMMAND" in
-    help|--help|-h)
-        print_help
+    help)
+        HELP_CMD="${POSITIONAL[1]:-}"
+        case "$HELP_CMD" in
+            create) print_help_create ;;
+            list)   print_help_list ;;
+            delete) print_help_delete ;;
+            *)      print_help_main ;;
+        esac
         exit 0
         ;;
     list)
@@ -331,7 +393,7 @@ case "$COMMAND" in
         ;;
     *)
         log_error "Unknown command: $COMMAND"
-        print_help >&2
+        print_help_main >&2
         exit 1
         ;;
 esac

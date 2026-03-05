@@ -124,9 +124,13 @@ Manage KVM-based AI developer VMs.
 Commands:
   create          Collect config, create, and provision a new VM
   list            List all configured VMs with their IP address and virsh status
+  status          Show detailed status of a VM (state, shares, SSH)
   delete          Stop and permanently delete a VM and its disk (config preserved)
   sync            Push host configs (claude.json, env) to an existing VM
   help [command]  Show this help, or detailed help for a command (default)
+
+Help topics (not commands):
+  help vm         What gets installed and shared on a provisioned VM
 
 Use '$(basename "$0") <command> --help' for the same per-command help.
 
@@ -203,6 +207,55 @@ Options:
 Examples:
   $(basename "$0") sync aidvm2
   $(basename "$0") sync --vm-name=aidvm2
+
+EOF
+}
+
+print_help_vm() {
+    cat <<EOF
+VM contents — what gets installed and shared on a provisioned VM
+
+Installed packages:
+  - git, vim, neovim, tmux, curl, wget
+  - build-essential, cmake, python3, python3-pip
+  - Node.js (LTS via nodesource)
+  - Claude CLI          →  claude
+  - GitHub CLI          →  gh
+  - GitHub Copilot CLI  →  gh copilot suggest / gh copilot explain
+  - Android Studio      →  android-studio  (via snap, GUI via ssh -X)
+  - Qt Creator          →  qtcreator       (via apt,  GUI via ssh -X)
+
+Copied from host on each create/sync:
+  - ~/.claude.json      (Claude Code login session)
+
+Host environment applied to ~/.bashrc (current values at provision time):
+  - PATH additions: ~/bin, ~/.local/bin
+  - PS1, NAME, EMAIL, DEBFULLNAME, DEBEMAIL
+  - VISUAL, XEDITOR, EDITOR, ANDROID_HOME
+
+Virtiofs shares (host directory → VM mountpoint):
+  - ~/.claude       →  ~/.claude        (tag: claude)
+  - ~/.copilot      →  ~/.copilot       (tag: copilot)
+  - ~/.config/nvim  →  ~/.config/nvim   (tag: nvim-config)
+
+EOF
+}
+
+print_help_status() {
+    cat <<EOF
+Usage: $(basename "$0") status [vm-name] [OPTIONS]
+
+Show detailed runtime status of a VM:
+  - virsh state, IP, vCPUs, RAM
+  - SSH reachability
+  - Configured virtiofs shares and their mount status inside the VM
+
+Options:
+  --vm-name=<name>   VM to inspect (alternative to positional argument)
+
+Examples:
+  $(basename "$0") status aidvm2
+  $(basename "$0") status --vm-name=aidvm2
 
 EOF
 }
@@ -307,6 +360,69 @@ cmd_delete() {
     [ -n "$vm_ip" ] && { ssh-keygen -R "$vm_ip" 2>/dev/null || true; }
 
     log_info "Done. Config preserved at $conf — run './$(basename "$0") create' to rebuild."
+}
+
+cmd_status() {
+    local vm_name="${1:-}"
+
+    if [ -z "$vm_name" ]; then
+        cmd_list
+        echo
+        ask_optional "VM name for status" vm_name
+    fi
+    if [ -z "$vm_name" ]; then
+        log_error "No VM name specified."
+        exit 1
+    fi
+
+    local conf="$CONFIG_DIR/${vm_name}.conf"
+    if [ ! -f "$conf" ]; then
+        log_error "No config found for '$vm_name' at $conf."
+        exit 1
+    fi
+    local VM_NAME VM_IP VM_ADMIN_USER VM_VCPUS VM_RAM VM_DISK_SIZE KVM_HOST
+    # shellcheck disable=SC1090
+    source "$conf"
+
+    log_title "Status: $vm_name"
+
+    local state
+    state=$(sudo virsh domstate "$vm_name" 2>/dev/null || echo "not found")
+    printf "  %-16s %s\n" "State:"    "$state"
+    printf "  %-16s %s\n" "IP:"       "$VM_IP"
+    printf "  %-16s %s\n" "vCPUs:"    "$VM_VCPUS"
+    printf "  %-16s %s\n" "RAM:"      "$VM_RAM"
+    printf "  %-16s %s\n" "Disk:"     "$VM_DISK_SIZE"
+    printf "  %-16s %s\n" "KVM host:" "$KVM_HOST"
+
+    local ssh_ok="no"
+    if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+            "${VM_ADMIN_USER}@${VM_IP}" true &>/dev/null 2>&1; then
+        ssh_ok="yes"
+    fi
+    printf "  %-16s %s\n" "SSH:"      "$ssh_ok"
+
+    echo
+    echo "  Virtiofs shares:"
+    if sudo virsh dominfo "$vm_name" &>/dev/null 2>&1; then
+        "$KVM_DIR/kvm-share.sh" list "$vm_name" | sed 's/^/    /'
+    else
+        echo "    (VM not found in libvirt)"
+    fi
+
+    if [ "$ssh_ok" = "yes" ]; then
+        echo
+        echo "  Mount status inside VM:"
+        ssh -o StrictHostKeyChecking=no "${VM_ADMIN_USER}@${VM_IP}" \
+            'for mp in ~/.claude ~/.copilot ~/.config/nvim; do
+                if mountpoint -q "$mp" 2>/dev/null; then
+                    printf "    %-30s mounted\n" "$mp"
+                else
+                    printf "    %-30s not mounted\n" "$mp"
+                fi
+            done'
+    fi
+    echo
 }
 
 scp_host_configs() {
@@ -439,6 +555,7 @@ if [ "$SHOW_HELP" = "true" ]; then
         true-list)   print_help_list ;;
         true-delete) print_help_delete ;;
         true-sync)   print_help_sync ;;
+        true-status) print_help_status ;;
         *)           print_help_main ;;
     esac
     exit 0
@@ -452,6 +569,8 @@ case "$COMMAND" in
             list)   print_help_list ;;
             delete) print_help_delete ;;
             sync)   print_help_sync ;;
+            status) print_help_status ;;
+            vm)     print_help_vm ;;
             *)      print_help_main ;;
         esac
         exit 0
@@ -468,6 +587,11 @@ case "$COMMAND" in
     sync)
         SYNC_VM_NAME="${CLI_VM_NAME:-${POSITIONAL[1]:-}}"
         cmd_sync "$SYNC_VM_NAME"
+        exit $?
+        ;;
+    status)
+        STATUS_VM_NAME="${CLI_VM_NAME:-${POSITIONAL[1]:-}}"
+        cmd_status "$STATUS_VM_NAME"
         exit $?
         ;;
     create)

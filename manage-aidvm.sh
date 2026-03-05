@@ -171,9 +171,9 @@ Config:
 
 Examples:
   $(basename "$0") create
-  $(basename "$0") create --vm-name=aidvm3 --vcpus=8 --ram=64G
-  $(basename "$0") create --batch --vm-name=aidvm3 \\
-      --network=net100 --ip=192.168.100.3 --github-pat=<token>
+  $(basename "$0") create aidvm2
+  $(basename "$0") create aidvm3 --vcpus=8 --ram=64G
+  $(basename "$0") create aidvm3 --batch --network=net100 --github-pat=<token>
 
 EOF
 }
@@ -476,7 +476,7 @@ cmd_sync() {
 
     log_title "Syncing configs to $vm_name ($VM_IP)"
     scp_host_configs "$VM_ADMIN_USER" "$VM_IP"
-    log_info "Done. You may need to restart nvim for config changes to take effect."
+    log_info "Done."
 }
 
 save_config() {
@@ -595,6 +595,7 @@ case "$COMMAND" in
         exit $?
         ;;
     create)
+        [ -z "$CLI_VM_NAME" ] && CLI_VM_NAME="${POSITIONAL[1]:-}"
         ;;
     *)
         log_error "Unknown command: $COMMAND"

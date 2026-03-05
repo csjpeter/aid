@@ -125,6 +125,7 @@ Commands:
   create          Collect config, create, and provision a new VM
   list            List all configured VMs with their IP address and virsh status
   delete          Stop and permanently delete a VM and its disk (config preserved)
+  sync            Push host configs (nvim, claude.json, env) to an existing VM
   help [command]  Show this help, or detailed help for a command (default)
 
 Use '$(basename "$0") <command> --help' for the same per-command help.
@@ -182,6 +183,25 @@ and current virsh status.
 
 Examples:
   $(basename "$0") list
+
+EOF
+}
+
+print_help_sync() {
+    cat <<EOF
+Usage: $(basename "$0") sync [vm-name] [OPTIONS]
+
+Push host configs to a running VM without full reprovisioning:
+  - ~/.config/nvim
+  - ~/.claude.json
+  - Host environment settings (~/.bashrc section)
+
+Options:
+  --vm-name=<name>   VM to sync (alternative to positional argument)
+
+Examples:
+  $(basename "$0") sync aidvm2
+  $(basename "$0") sync --vm-name=aidvm2
 
 EOF
 }
@@ -288,6 +308,66 @@ cmd_delete() {
     log_info "Done. Config preserved at $conf — run './$(basename "$0") create' to rebuild."
 }
 
+scp_host_configs() {
+    local admin_user="$1" vm_ip="$2"
+    local ssh_opts="-o StrictHostKeyChecking=no"
+
+    local _env_tmp
+    _env_tmp=$(mktemp /tmp/aid-env-XXXXXX.sh)
+    {
+        for _var in PS1 NAME EMAIL DEBFULLNAME DEBEMAIL VISUAL XEDITOR EDITOR ANDROID_HOME; do
+            _val="${!_var:-}"
+            [ -n "$_val" ] && printf 'export %s=%s\n' "$_var" "$(printf '%q' "$_val")"
+        done
+    } > "$_env_tmp"
+    scp $ssh_opts "$_env_tmp" "${admin_user}@${vm_ip}:/tmp/aid-env.sh"
+    rm -f "$_env_tmp"
+
+    if [ -f "$HOME/.claude.json" ]; then
+        log_info "Copying ~/.claude.json..."
+        scp $ssh_opts "$HOME/.claude.json" "${admin_user}@${vm_ip}:~/.claude.json"
+    fi
+
+    if [ -d "$HOME/.config/nvim" ]; then
+        log_info "Copying ~/.config/nvim..."
+        ssh $ssh_opts "${admin_user}@${vm_ip}" "mkdir -p ~/.config"
+        scp -r $ssh_opts "$HOME/.config/nvim" "${admin_user}@${vm_ip}:~/.config/"
+    fi
+}
+
+cmd_sync() {
+    local vm_name="${1:-}"
+
+    if [ -z "$vm_name" ]; then
+        cmd_list
+        echo
+        ask_optional "VM name to sync" vm_name
+    fi
+    if [ -z "$vm_name" ]; then
+        log_error "No VM name specified."
+        exit 1
+    fi
+
+    local conf="$CONFIG_DIR/${vm_name}.conf"
+    if [ ! -f "$conf" ]; then
+        log_error "No config found for '$vm_name' at $conf."
+        exit 1
+    fi
+    local VM_NAME VM_IP VM_ADMIN_USER
+    # shellcheck disable=SC1090
+    source "$conf"
+
+    if ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            "${VM_ADMIN_USER}@${VM_IP}" true &>/dev/null 2>&1; then
+        log_error "Cannot reach ${VM_ADMIN_USER}@${VM_IP}."
+        exit 1
+    fi
+
+    log_title "Syncing configs to $vm_name ($VM_IP)"
+    scp_host_configs "$VM_ADMIN_USER" "$VM_IP"
+    log_info "Done. You may need to restart nvim for config changes to take effect."
+}
+
 save_config() {
     mkdir -p "$CONFIG_DIR"
     cat > "$CONFIG_FILE" << CONF
@@ -363,6 +443,7 @@ if [ "$SHOW_HELP" = "true" ]; then
         true-create) print_help_create ;;
         true-list)   print_help_list ;;
         true-delete) print_help_delete ;;
+        true-sync)   print_help_sync ;;
         *)           print_help_main ;;
     esac
     exit 0
@@ -375,6 +456,7 @@ case "$COMMAND" in
             create) print_help_create ;;
             list)   print_help_list ;;
             delete) print_help_delete ;;
+            sync)   print_help_sync ;;
             *)      print_help_main ;;
         esac
         exit 0
@@ -386,6 +468,11 @@ case "$COMMAND" in
     delete)
         DELETE_VM_NAME="${CLI_VM_NAME:-${POSITIONAL[1]:-}}"
         cmd_delete "$DELETE_VM_NAME" "$BATCH"
+        exit $?
+        ;;
+    sync)
+        SYNC_VM_NAME="${CLI_VM_NAME:-${POSITIONAL[1]:-}}"
+        cmd_sync "$SYNC_VM_NAME"
         exit $?
         ;;
     create)
@@ -692,36 +779,12 @@ else
         "${VM_ADMIN_USER}@${VM_IP}:/tmp/provision-aidvm.sh"
 
     log_info "Collecting host environment settings..."
-    _env_tmp=$(mktemp /tmp/aid-env-XXXXXX.sh)
-    {
-        for _var in PS1 NAME EMAIL DEBFULLNAME DEBEMAIL VISUAL XEDITOR EDITOR ANDROID_HOME; do
-            _val="${!_var:-}"
-            [ -n "$_val" ] && printf 'export %s=%s\n' "$_var" "$(printf '%q' "$_val")"
-        done
-    } > "$_env_tmp"
-    scp -o StrictHostKeyChecking=no "$_env_tmp" "${VM_ADMIN_USER}@${VM_IP}:/tmp/aid-env.sh"
-    rm -f "$_env_tmp"
+    scp_host_configs "$VM_ADMIN_USER" "$VM_IP"
 
     log_info "Running provisioning (may take 10-20 minutes)..."
     ssh -o StrictHostKeyChecking=no \
         "${VM_ADMIN_USER}@${VM_IP}" \
         "GITHUB_PAT='${GITHUB_PAT}' CLAUDE_API_KEY='${CLAUDE_API_KEY}' bash /tmp/provision-aidvm.sh"
-
-    if [ -f "$HOME/.claude.json" ]; then
-        log_info "Copying ~/.claude.json to VM..."
-        scp -o StrictHostKeyChecking=no \
-            "$HOME/.claude.json" \
-            "${VM_ADMIN_USER}@${VM_IP}:~/.claude.json"
-    fi
-
-    if [ -d "$HOME/.config/nvim" ]; then
-        log_info "Copying ~/.config/nvim to VM..."
-        ssh -o StrictHostKeyChecking=no "${VM_ADMIN_USER}@${VM_IP}" \
-            "mkdir -p ~/.config"
-        scp -r -o StrictHostKeyChecking=no \
-            "$HOME/.config/nvim" \
-            "${VM_ADMIN_USER}@${VM_IP}:~/.config/"
-    fi
 
     log_title "VM $VM_NAME is ready!"
     log_info "Connect:        ssh ${VM_ADMIN_USER}@${VM_IP}"

@@ -4,11 +4,11 @@
 - Name: Peter Csaszar (Császár Péter), login: csjpeter
 
 ## Project purpose
-Scripts to create and provision KVM-based AI developer VMs (`ai-dev-vm-1`, `ai-dev-vm-2`, etc.).
+Scripts to create and provision KVM-based AI developer VMs (`aidvm2`, `aidvm3`, etc.).
 
 ## Key files
-- `create-ai-dev-vm.sh` — interactive orchestrator: config collection, VM creation, provisioning trigger
-- `provision-ai-dev-vm.sh` — runs on the VM via SSH, installs all dev tools
+- `manage-aidvm.sh` — orchestrator: config collection, VM creation, provisioning trigger
+- `provision-aidvm.sh` — runs on the VM via SSH, installs all dev tools
 - `LICENSE` — BSD 3-Clause
 - `README.md` — GitHub project documentation
 
@@ -23,7 +23,7 @@ Included as a git submodule at `kvm/`. Always study these before modifying VM cr
 ## Design decisions
 - One config file per VM: `~/.config/aid/<vm-name>.conf`, always `chmod 600`
 - Default resources: 4 vCPUs, 32G RAM, 200G disk, ubuntu24 image
-- VM IP last octet matches VM name suffix: `ai-dev-vm-3` → `x.x.x.3`; suffix 1 is forbidden (gateway)
+- VM IP last octet matches VM name suffix: `aidvm3` → `x.x.x.3`; suffix 1 is forbidden (gateway)
 - GitHub authentication uses fine-grained PAT (not classic token)
 - Claude CLI installed via `curl -fsSL https://claude.ai/install.sh | bash` (not npm)
 - GitHub Copilot CLI installed via `curl -fsSL https://gh.io/copilot-install | bash` (not gh extension)

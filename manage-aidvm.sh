@@ -89,14 +89,14 @@ choose() {
 
 suggest_vm_name() {
     if ! command -v virsh &>/dev/null && ! sudo virsh --version &>/dev/null 2>&1; then
-        echo "ai-dev-vm-2"
+        echo "aidvm2"
         return
     fi
     local n=2  # .1 is reserved for the network gateway
-    while sudo virsh dominfo "ai-dev-vm-$n" &>/dev/null 2>&1; do
+    while sudo virsh dominfo "aidvm$n" &>/dev/null 2>&1; do
         ((n++))
     done
-    echo "ai-dev-vm-$n"
+    echo "aidvm$n"
 }
 
 list_networks() {
@@ -142,7 +142,7 @@ If a saved config exists for the VM name it is loaded as defaults.
 CLI options override saved config. Config is updated on each run.
 
 Options:
-  --vm-name=<name>          VM name (default: ai-dev-vm-N, N≥2)
+  --vm-name=<name>          VM name (default: aidvmN, N≥2)
   --base-image=<image>      Base OS image: ubuntu24 ubuntu22 ubuntu20 rocky9 debian12
                               (default: ubuntu24)
   --vcpus=<n>               Number of vCPUs (default: 4)
@@ -158,8 +158,8 @@ Options:
   --batch                   Non-interactive: use defaults/config/CLI values only
 
 VM naming:
-  Default name follows the pattern ai-dev-vm-N (N starting at 2).
-  The VM IP last octet is derived from N (ai-dev-vm-3 → x.x.x.3).
+  Default name follows the pattern aidvmN (N starting at 2).
+  The VM IP last octet is derived from N (aidvm3 → x.x.x.3).
   Suffix 1 is forbidden — reserved for the network gateway.
 
 Config:
@@ -167,8 +167,8 @@ Config:
 
 Examples:
   $(basename "$0") create
-  $(basename "$0") create --vm-name=ai-dev-vm-3 --vcpus=8 --ram=64G
-  $(basename "$0") create --batch --vm-name=ai-dev-vm-3 \\
+  $(basename "$0") create --vm-name=aidvm3 --vcpus=8 --ram=64G
+  $(basename "$0") create --batch --vm-name=aidvm3 \\
       --network=net100 --ip=192.168.100.3 --github-pat=<token>
 
 EOF
@@ -199,9 +199,9 @@ Options:
   --batch            Skip the confirmation prompt
 
 Examples:
-  $(basename "$0") delete ai-dev-vm-2
-  $(basename "$0") delete --vm-name=ai-dev-vm-2
-  $(basename "$0") delete --vm-name=ai-dev-vm-2 --batch
+  $(basename "$0") delete aidvm2
+  $(basename "$0") delete --vm-name=aidvm2
+  $(basename "$0") delete --vm-name=aidvm2 --batch
 
 EOF
 }
@@ -414,7 +414,7 @@ else
     ask "VM name" "$DEFAULT_NAME" VM_NAME
 fi
 
-if [[ "$VM_NAME" =~ -([0-9]+)$ ]] && [ "${BASH_REMATCH[1]}" -eq 1 ]; then
+if [[ "$VM_NAME" =~ ([0-9]+)$ ]] && [ "${BASH_REMATCH[1]}" -eq 1 ]; then
     log_error "VM name '$VM_NAME' derives IP .1 which is reserved for the network gateway. Use suffix 2 or higher."
     exit 1
 fi
@@ -510,7 +510,7 @@ fi
 # Step 7: IP address — derive last octet from VM name suffix
 NET_PREFIX=$(get_network_prefix "$LIBVIRT_NETWORK")
 VM_NUMBER=""
-if [[ "$VM_NAME" =~ -([0-9]+)$ ]]; then
+if [[ "$VM_NAME" =~ ([0-9]+)$ ]]; then
     VM_NUMBER="${BASH_REMATCH[1]}"
 fi
 if [ -n "$VM_NUMBER" ] && [ -n "$NET_PREFIX" ]; then
@@ -673,7 +673,7 @@ fi
 
 log_title "Provisioning VM: $VM_NAME"
 
-PROVISION_SCRIPT="$SCRIPT_DIR/provision-ai-dev-vm.sh"
+PROVISION_SCRIPT="$SCRIPT_DIR/provision-aidvm.sh"
 
 if ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
         "${VM_ADMIN_USER}@${VM_IP}" true &>/dev/null 2>&1; then
@@ -683,19 +683,19 @@ if ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
     log_info "To provision manually from a host that can reach the VM:"
     echo "  scp $PROVISION_SCRIPT ${VM_ADMIN_USER}@${VM_IP}:/tmp/"
     echo "  ssh ${VM_ADMIN_USER}@${VM_IP} \\"
-    echo "    \"GITHUB_PAT='\${GITHUB_PAT}' CLAUDE_API_KEY='\${CLAUDE_API_KEY}' bash /tmp/provision-ai-dev-vm.sh\""
+    echo "    \"GITHUB_PAT='\${GITHUB_PAT}' CLAUDE_API_KEY='\${CLAUDE_API_KEY}' bash /tmp/provision-aidvm.sh\""
     echo
     log_info "Config is saved at: $CONFIG_FILE"
 else
     log_info "Copying provisioning script to VM..."
     scp -o StrictHostKeyChecking=no \
         "$PROVISION_SCRIPT" \
-        "${VM_ADMIN_USER}@${VM_IP}:/tmp/provision-ai-dev-vm.sh"
+        "${VM_ADMIN_USER}@${VM_IP}:/tmp/provision-aidvm.sh"
 
     log_info "Running provisioning (may take 10-20 minutes)..."
     ssh -o StrictHostKeyChecking=no \
         "${VM_ADMIN_USER}@${VM_IP}" \
-        "GITHUB_PAT='${GITHUB_PAT}' CLAUDE_API_KEY='${CLAUDE_API_KEY}' bash /tmp/provision-ai-dev-vm.sh"
+        "GITHUB_PAT='${GITHUB_PAT}' CLAUDE_API_KEY='${CLAUDE_API_KEY}' bash /tmp/provision-aidvm.sh"
 
     if [ -f "$HOME/.claude.json" ]; then
         log_info "Copying ~/.claude.json to VM..."

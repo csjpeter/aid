@@ -792,10 +792,14 @@ else
 fi
 
 if ping -c1 -W1 "$VM_IP" &>/dev/null 2>&1; then
-    log_warning "IP $VM_IP is already responding to ping."
-    if [ "$BATCH" = "true" ]; then
-        log_info "Continuing in batch mode..."
+    if sudo virsh dominfo "$VM_NAME" &>/dev/null 2>&1; then
+        log_info "IP $VM_IP: in use by $VM_NAME (expected)"
     else
+        log_warning "IP $VM_IP is already responding to ping but '$VM_NAME' does not exist in libvirt — possible IP conflict."
+        if [ "$BATCH" = "true" ]; then
+            log_error "Aborting in batch mode to avoid networking conflict."
+            exit 1
+        fi
         read -rp "$(echo -e "${YELLOW}?${NC} Continue anyway? [y/N]: ")" ans
         [[ "${ans:-N}" =~ ^[Yy] ]] || { log_error "Aborted."; exit 1; }
     fi

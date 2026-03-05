@@ -55,7 +55,7 @@ Provisioning steps:
                                copilot    → ~/.copilot
                                nvim-config → ~/.config/nvim
    5. Claude CLI             curl -fsSL https://claude.ai/install.sh | bash
-   6. GitHub CLI             via official apt repository
+   6. GitHub CLI             via https://cli.github.com/packages (official apt repo)
    7. GitHub Copilot CLI     curl -fsSL https://gh.io/copilot-install | bash
    8. Android Studio         snap install android-studio --classic
    9. Qt & Qt Creator        apt: qtcreator qt6-base-dev

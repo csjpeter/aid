@@ -199,8 +199,6 @@ Push host configs to a running VM without full reprovisioning:
   - ~/.claude.json
   - Host environment settings (~/.bashrc section)
 
-Note: ~/.config/nvim is shared live via virtiofs and always up to date.
-
 Options:
   --vm-name=<name>   VM to sync (alternative to positional argument)
 

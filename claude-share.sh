@@ -32,6 +32,7 @@ Commands:
   setup-client   Install sshfs, SSH alias, and systemd mount service on this machine
   mount          Mount ~/.claude from the desktop (client only)
   umount         Unmount ~/.claude (client only)
+  sync-json      Sync ~/.claude.json with the desktop (newer side wins)
   status         Show connection and mount status
   help [cmd]     Show this help, or detailed help for a command (default)
 
@@ -107,6 +108,20 @@ Unmount ~/.claude on this machine.
 
 Examples:
   $(basename "$0") umount
+
+EOF
+}
+
+print_help_sync_json() {
+    cat <<EOF
+Usage: $(basename "$0") sync-json
+
+Sync ~/.claude.json between this machine and the desktop.
+Compares modification times and copies the newer version to the other side.
+Safe to run at any time — never overwrites a newer file.
+
+Examples:
+  $(basename "$0") sync-json
 
 EOF
 }
@@ -331,6 +346,57 @@ cmd_umount() {
     log_info "~/.claude unmounted."
 }
 
+cmd_sync_json() {
+    local ssh_alias="${CLI_SSH_ALIAS:-desktop}"
+    local local_file="$HOME/.claude.json"
+
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$ssh_alias" true 2>/dev/null; then
+        log_error "Cannot reach '${ssh_alias}'."
+        exit 1
+    fi
+
+    local remote_exists
+    remote_exists=$(ssh "$ssh_alias" '[ -f ~/.claude.json ] && echo yes || echo no')
+    local local_exists=false
+    [ -f "$local_file" ] && local_exists=true
+
+    if [ "$remote_exists" = "no" ] && [ "$local_exists" = "false" ]; then
+        log_info "~/.claude.json does not exist on either side — nothing to sync."
+        return
+    fi
+
+    if [ "$remote_exists" = "no" ]; then
+        log_info "Remote ~/.claude.json missing — pushing local copy to ${ssh_alias}..."
+        scp "$local_file" "${ssh_alias}:~/.claude.json"
+        log_info "Done."
+        return
+    fi
+
+    if [ "$local_exists" = "false" ]; then
+        log_info "Local ~/.claude.json missing — pulling from ${ssh_alias}..."
+        scp "${ssh_alias}:~/.claude.json" "$local_file"
+        log_info "Done."
+        return
+    fi
+
+    # Both exist — compare modification times, copy the newer one
+    local remote_mtime local_mtime
+    remote_mtime=$(ssh "$ssh_alias" "stat -c %Y ~/.claude.json")
+    local_mtime=$(stat -c %Y "$local_file")
+
+    if [ "$local_mtime" -gt "$remote_mtime" ]; then
+        log_info "Local is newer — pushing to ${ssh_alias}..."
+        scp "$local_file" "${ssh_alias}:~/.claude.json"
+        log_info "Done."
+    elif [ "$remote_mtime" -gt "$local_mtime" ]; then
+        log_info "Remote is newer — pulling from ${ssh_alias}..."
+        scp "${ssh_alias}:~/.claude.json" "$local_file"
+        log_info "Done."
+    else
+        log_info "~/.claude.json is already in sync (same modification time)."
+    fi
+}
+
 cmd_status() {
     log_title "Claude share status"
 
@@ -414,6 +480,7 @@ if [ "$SHOW_HELP" = "true" ]; then
         true-setup-client) print_help_setup_client ;;
         true-mount)        print_help_mount ;;
         true-umount)       print_help_umount ;;
+        true-sync-json)    print_help_sync_json ;;
         true-status)       print_help_status ;;
         *)                 print_help_main ;;
     esac
@@ -427,6 +494,7 @@ case "$COMMAND" in
             setup-client) print_help_setup_client ;;
             mount)        print_help_mount ;;
             umount)       print_help_umount ;;
+            sync-json)    print_help_sync_json ;;
             status)       print_help_status ;;
             *)            print_help_main ;;
         esac
@@ -436,6 +504,7 @@ case "$COMMAND" in
     setup-client) cmd_setup_client ;;
     mount)        cmd_mount ;;
     umount)       cmd_umount ;;
+    sync-json)    cmd_sync_json ;;
     status)       cmd_status ;;
     *)
         log_error "Unknown command: $COMMAND"

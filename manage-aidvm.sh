@@ -474,7 +474,15 @@ cmd_sync() {
 
     log_title "Syncing configs to $vm_name ($VM_IP)"
     scp_host_configs "$VM_ADMIN_USER" "$VM_IP"
-    log_info "Done."
+
+    local provision_script="$SCRIPT_DIR/provision-aidvm.sh"
+    log_info "Copying provisioning script to VM ~/bin/..."
+    ssh -o StrictHostKeyChecking=no "${VM_ADMIN_USER}@${VM_IP}" "mkdir -p ~/bin"
+    scp -o StrictHostKeyChecking=no \
+        "$provision_script" \
+        "${VM_ADMIN_USER}@${VM_IP}:~/bin/provision-aidvm.sh"
+    log_info "Done. Run individual steps with:"
+    log_info "  ssh ${VM_ADMIN_USER}@${VM_IP} provision-aidvm.sh <step>"
 }
 
 save_config() {
@@ -896,16 +904,18 @@ if ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
     log_info "The VM may be on a NATted network only accessible from the KVM host."
     log_info ""
     log_info "To provision manually from a host that can reach the VM:"
-    echo "  scp $PROVISION_SCRIPT ${VM_ADMIN_USER}@${VM_IP}:/tmp/"
+    echo "  ssh ${VM_ADMIN_USER}@${VM_IP} mkdir -p ~/bin"
+    echo "  scp $PROVISION_SCRIPT ${VM_ADMIN_USER}@${VM_IP}:~/bin/"
     echo "  ssh ${VM_ADMIN_USER}@${VM_IP} \\"
-    echo "    \"GITHUB_PAT='\${GITHUB_PAT}' CLAUDE_API_KEY='\${CLAUDE_API_KEY}' bash /tmp/provision-aidvm.sh run\""
+    echo "    \"GITHUB_PAT='\${GITHUB_PAT}' CLAUDE_API_KEY='\${CLAUDE_API_KEY}' provision-aidvm.sh run\""
     echo
     log_info "Config is saved at: $CONFIG_FILE"
 else
     log_info "Copying provisioning script to VM..."
+    ssh -o StrictHostKeyChecking=no "${VM_ADMIN_USER}@${VM_IP}" "mkdir -p ~/bin"
     scp -o StrictHostKeyChecking=no \
         "$PROVISION_SCRIPT" \
-        "${VM_ADMIN_USER}@${VM_IP}:/tmp/provision-aidvm.sh"
+        "${VM_ADMIN_USER}@${VM_IP}:~/bin/provision-aidvm.sh"
 
     log_info "Collecting host environment settings..."
     scp_host_configs "$VM_ADMIN_USER" "$VM_IP"
@@ -913,7 +923,7 @@ else
     log_info "Running provisioning (may take 10-20 minutes)..."
     ssh -o StrictHostKeyChecking=no \
         "${VM_ADMIN_USER}@${VM_IP}" \
-        "GITHUB_PAT='${GITHUB_PAT}' CLAUDE_API_KEY='${CLAUDE_API_KEY}' bash /tmp/provision-aidvm.sh run"
+        "GITHUB_PAT='${GITHUB_PAT}' CLAUDE_API_KEY='${CLAUDE_API_KEY}' provision-aidvm.sh run"
 
     log_title "VM $VM_NAME is ready!"
     log_info "Connect:        ssh ${VM_ADMIN_USER}@${VM_IP}"

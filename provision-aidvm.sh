@@ -39,9 +39,9 @@ Individual steps (also idempotent, safe to re-run):
   cleanup          Step 13: apt autoremove + clean
 
 To run a single step on an existing VM from the host:
-  ssh <vm-ip> "bash /tmp/provision-aidvm.sh <step>"
+  ssh <vm-ip> "provision-aidvm.sh <step>"
   # or after manage-aidvm.sh sync <vm>:
-  ssh <vm-ip> "bash /tmp/provision-aidvm.sh gemini"
+  ssh <vm-ip> "provision-aidvm.sh gemini"
 
 Environment variables (needed by some steps):
   GITHUB_PAT       Fine-grained PAT — used by github-cli step
@@ -377,6 +377,9 @@ step_x11() {
 
 step_bashrc() {
     log_title "Bashrc settings"
+
+    mkdir -p "$HOME/bin"
+    log "~/bin created"
 
     AID_MARKER="# >>> aid provision begin <<<"
     if grep -q "$AID_MARKER" "$HOME/.bashrc" 2>/dev/null; then

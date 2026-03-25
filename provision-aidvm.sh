@@ -15,20 +15,39 @@ log_error() { echo -e "\033[0;31m[error]\033[0m $*" >&2; }
 
 print_help_main() {
     cat <<EOF
-Usage: $(basename "$0") [COMMAND]
+Usage: $(basename "$0") <command> [OPTIONS]
 
 Provision an AI dev VM with development tools and configuration.
 Typically invoked automatically by manage-aidvm.sh via SSH.
 
-Commands:
-  run          Run full provisioning
-  help [run]   Show this help, or detailed help for a command (default)
+Full provisioning:
+  run              Run all steps in sequence (idempotent)
 
-Environment variables (passed before 'run'):
-  GITHUB_PAT       GitHub fine-grained PAT for gh auth login
-  CLAUDE_API_KEY   Anthropic API key — written to ~/.bashrc as ANTHROPIC_API_KEY
+Individual steps (also idempotent, safe to re-run):
+  update           Step  1: apt update + upgrade
+  dev-tools        Step  2: common dev packages (git vim neovim tmux curl …)
+  nodejs           Step  3: Node.js LTS via nodesource
+  virtiofs         Step  4: virtiofs shared directory mounts
+  claude           Step  5: Claude CLI + ANTHROPIC_API_KEY
+  github-cli       Step  6: GitHub CLI (apt) + gh auth login
+  copilot          Step  7: GitHub Copilot CLI
+  gemini           Step  8: Google Gemini CLI (npm)
+  android-studio   Step  9: Android Studio (snap)
+  qt               Step 10: Qt 6 + Qt Creator (apt)
+  x11              Step 11: SSH X11 forwarding
+  bashrc           Step 12: PATH + host env vars in ~/.bashrc
+  cleanup          Step 13: apt autoremove + clean
 
-Use '$(basename "$0") <command> --help' for the same per-command help.
+To run a single step on an existing VM from the host:
+  ssh <vm-ip> "bash /tmp/provision-aidvm.sh <step>"
+  # or after manage-aidvm.sh sync <vm>:
+  ssh <vm-ip> "bash /tmp/provision-aidvm.sh gemini"
+
+Environment variables (needed by some steps):
+  GITHUB_PAT       Fine-grained PAT — used by github-cli step
+  CLAUDE_API_KEY   Anthropic API key — used by claude step
+
+Use '$(basename "$0") help <step>' or '<step> --help' for step details.
 
 EOF
 }
@@ -37,48 +56,169 @@ print_help_run() {
     cat <<EOF
 Usage: $(basename "$0") run
 
-Run full provisioning. Installs all dev tools and applies configuration.
-Idempotent — safe to run again on an already-provisioned VM.
-
-Environment variables:
-  GITHUB_PAT       GitHub PAT (optional — run 'gh auth login' manually if omitted)
-  CLAUDE_API_KEY   Anthropic API key (optional — written to ~/.bashrc if provided)
-
-Provisioning steps:
-   1. System update          apt-get update + upgrade
-   2. Common dev tools       git vim neovim tmux curl wget build-essential
-                             cmake python3 python3-pip unzip zip jq
-                             xauth x11-apps openssh-server
-   3. Node.js LTS            via nodesource setup script
-   4. Virtiofs shares        fstab entries + mount attempts:
-                               claude     → ~/.claude
-                               copilot    → ~/.copilot
-                               nvim-config → ~/.config/nvim
-   5. Claude CLI             curl -fsSL https://claude.ai/install.sh | bash
-   6. GitHub CLI             via https://cli.github.com/packages (official apt repo)
-   7. GitHub Copilot CLI     curl -fsSL https://gh.io/copilot-install | bash
-   8. Android Studio         snap install android-studio --classic
-   9. Qt & Qt Creator        apt: qtcreator qt6-base-dev
-  10. SSH X11 forwarding     sshd_config: X11Forwarding yes, X11UseLocalhost no
-  11. Bashrc settings        PATH (~/bin, ~/.local/bin) + host environment variables
-                             (PS1, NAME, EMAIL, DEBFULLNAME, DEBEMAIL,
-                              VISUAL, XEDITOR, EDITOR, ANDROID_HOME)
-  12. Cleanup                apt autoremove + clean
+Run all provisioning steps in sequence. Idempotent — safe to re-run.
+Each step can also be run individually; see '$(basename "$0") help' for the list.
 
 EOF
 }
 
-# ── Provisioning ───────────────────────────────────────────────────────────────
+print_help_step() {
+    local step="$1"
+    case "$step" in
+        update)
+            cat <<EOF
+Usage: $(basename "$0") update
 
-cmd_run() {
-    # ── System update ───────────────────────────────────────────────────────────
+Step 1 — System update.
+  apt-get update && apt-get upgrade
 
+EOF
+            ;;
+        dev-tools)
+            cat <<EOF
+Usage: $(basename "$0") dev-tools
+
+Step 2 — Common dev tools.
+  Installs: git vim neovim tmux curl wget build-essential cmake
+            python3 python3-pip unzip zip jq xauth x11-apps openssh-server
+
+EOF
+            ;;
+        nodejs)
+            cat <<EOF
+Usage: $(basename "$0") nodejs
+
+Step 3 — Node.js LTS.
+  Adds the NodeSource apt repository and installs nodejs + npm.
+  Skipped if node is already present.
+
+EOF
+            ;;
+        virtiofs)
+            cat <<EOF
+Usage: $(basename "$0") virtiofs
+
+Step 4 — Virtiofs shared directory mounts.
+  Tags and mount points:
+    claude      → ~/.claude
+    copilot     → ~/.copilot
+    nvim-config → ~/.config/nvim
+
+  Adds fstab entries and mounts immediately. Requires the host to have
+  attached the shares via manage-aidvm.sh (kvm-share.sh attach).
+
+EOF
+            ;;
+        claude)
+            cat <<EOF
+Usage: $(basename "$0") claude
+
+Step 5 — Claude CLI.
+  Installs via: curl -fsSL https://claude.ai/install.sh | bash
+  If CLAUDE_API_KEY is set, writes ANTHROPIC_API_KEY to ~/.bashrc.
+
+EOF
+            ;;
+        github-cli)
+            cat <<EOF
+Usage: $(basename "$0") github-cli
+
+Step 6 — GitHub CLI.
+  Adds the official GitHub apt repository and installs gh.
+  If GITHUB_PAT is set, runs: gh auth login --with-token.
+
+EOF
+            ;;
+        copilot)
+            cat <<EOF
+Usage: $(basename "$0") copilot
+
+Step 7 — GitHub Copilot CLI.
+  Installs via: curl -fsSL https://gh.io/copilot-install | bash
+  Provides: gh copilot suggest / gh copilot explain
+
+EOF
+            ;;
+        gemini)
+            cat <<EOF
+Usage: $(basename "$0") gemini
+
+Step 8 — Google Gemini CLI.
+  Installs via: sudo npm install -g @google/gemini-cli
+  Requires Node.js (step 3). Skipped if gemini is already present.
+
+EOF
+            ;;
+        android-studio)
+            cat <<EOF
+Usage: $(basename "$0") android-studio
+
+Step 9 — Android Studio.
+  Installs via: snap install android-studio --classic
+  Also writes ANDROID_HOME + PATH to /etc/profile.d/android.sh.
+  Launch via SSH X11: ssh -X <user>@<ip> android-studio
+
+EOF
+            ;;
+        qt)
+            cat <<EOF
+Usage: $(basename "$0") qt
+
+Step 10 — Qt 6 & Qt Creator.
+  Installs: qtcreator qt6-base-dev cmake qt6-tools-dev (if available)
+  Launch via SSH X11: ssh -X <user>@<ip> qtcreator
+
+EOF
+            ;;
+        x11)
+            cat <<EOF
+Usage: $(basename "$0") x11
+
+Step 11 — SSH X11 forwarding.
+  Sets in /etc/ssh/sshd_config:
+    X11Forwarding yes
+    X11UseLocalhost no
+  Restarts sshd.
+
+EOF
+            ;;
+        bashrc)
+            cat <<EOF
+Usage: $(basename "$0") bashrc
+
+Step 12 — Bashrc settings.
+  Appends a guarded block to ~/.bashrc (skipped if already present):
+    - Adds ~/bin and ~/.local/bin to PATH
+    - Applies host env vars from /tmp/aid-env.sh if present:
+        PS1, NAME, EMAIL, DEBFULLNAME, DEBEMAIL,
+        VISUAL, XEDITOR, EDITOR, ANDROID_HOME
+
+EOF
+            ;;
+        cleanup)
+            cat <<EOF
+Usage: $(basename "$0") cleanup
+
+Step 13 — Cleanup.
+  apt-get autoremove + apt-get clean
+
+EOF
+            ;;
+        *)
+            print_help_main
+            ;;
+    esac
+}
+
+# ── Provisioning steps ─────────────────────────────────────────────────────────
+
+step_update() {
     log_title "System update"
     sudo apt-get update -y
     sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
+}
 
-    # ── Common dev tools ────────────────────────────────────────────────────────
-
+step_dev_tools() {
     log_title "Common dev tools"
     sudo apt-get install -y \
         git \
@@ -97,18 +237,18 @@ cmd_run() {
         xauth \
         x11-apps \
         openssh-server
+}
 
-    # ── Node.js (LTS) ───────────────────────────────────────────────────────────
-
+step_nodejs() {
     log_title "Node.js (LTS)"
     if ! command -v node &>/dev/null; then
         curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
         sudo apt-get install -y nodejs
     fi
     log "Node.js $(node --version), npm $(npm --version)"
+}
 
-    # ── Virtiofs shared directories ─────────────────────────────────────────────
-
+step_virtiofs() {
     log_title "Virtiofs shared directories"
     sudo modprobe virtiofs 2>/dev/null || true
 
@@ -128,15 +268,14 @@ cmd_run() {
             log_warn "Could not mount ${tag} — share may not be attached to this VM"
         fi
     done
+}
 
-    # ── Claude CLI ──────────────────────────────────────────────────────────────
-
+step_claude() {
     log_title "Claude CLI"
     curl -fsSL https://claude.ai/install.sh | bash
     log "Claude CLI $(claude --version 2>/dev/null || echo 'installed')"
 
     if [ -n "$CLAUDE_API_KEY" ]; then
-        # ANTHROPIC_API_KEY is the standard env var Claude CLI reads
         if ! grep -q "ANTHROPIC_API_KEY" "$HOME/.bashrc" 2>/dev/null; then
             echo "export ANTHROPIC_API_KEY='${CLAUDE_API_KEY}'" >> "$HOME/.bashrc"
         else
@@ -144,9 +283,9 @@ cmd_run() {
         fi
         log "Claude API key written to ~/.bashrc"
     fi
+}
 
-    # ── GitHub CLI ──────────────────────────────────────────────────────────────
-
+step_github_cli() {
     log_title "GitHub CLI"
     if ! command -v gh &>/dev/null; then
         curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -165,15 +304,25 @@ cmd_run() {
     else
         log_warn "No GITHUB_PAT provided — run 'gh auth login' manually"
     fi
+}
 
-    # ── GitHub Copilot CLI ──────────────────────────────────────────────────────
-
+step_copilot() {
     log_title "GitHub Copilot CLI"
     curl -fsSL https://gh.io/copilot-install | bash
     log "Copilot: gh copilot suggest / gh copilot explain"
+}
 
-    # ── Android Studio ──────────────────────────────────────────────────────────
+step_gemini() {
+    log_title "Gemini CLI"
+    if command -v gemini &>/dev/null; then
+        log "Gemini CLI already installed: $(gemini --version 2>/dev/null || echo 'present')"
+    else
+        sudo npm install -g @google/gemini-cli
+        log "Gemini CLI $(gemini --version 2>/dev/null || echo 'installed')"
+    fi
+}
 
+step_android_studio() {
     log_title "Android Studio"
 
     if ! command -v snap &>/dev/null; then
@@ -194,9 +343,9 @@ EOF
     fi
     log "Android environment written to /etc/profile.d/android.sh"
     log "Launch with: android-studio  (accepts X11 display)"
+}
 
-    # ── Qt ──────────────────────────────────────────────────────────────────────
-
+step_qt() {
     log_title "Qt & Qt Creator"
     sudo apt-get install -y \
         qtcreator \
@@ -204,9 +353,9 @@ EOF
         cmake
     sudo apt-get install -y qt6-tools-dev 2>/dev/null || true
     log "Qt Creator installed. Launch with: qtcreator"
+}
 
-    # ── SSH X11 forwarding ──────────────────────────────────────────────────────
-
+step_x11() {
     log_title "SSH X11 forwarding"
     SSHD_CFG="/etc/ssh/sshd_config"
 
@@ -224,9 +373,9 @@ EOF
 
     sudo systemctl restart ssh
     log "X11 forwarding enabled. Connect with: ssh -X user@ip"
+}
 
-    # ── Bashrc settings ─────────────────────────────────────────────────────────
-
+step_bashrc() {
     log_title "Bashrc settings"
 
     AID_MARKER="# >>> aid provision begin <<<"
@@ -251,25 +400,42 @@ EOF
         } >> "$HOME/.bashrc"
         log "Bashrc settings applied."
     fi
+}
 
-    # ── Cleanup ─────────────────────────────────────────────────────────────────
-
+step_cleanup() {
     log_title "Cleanup"
     sudo apt-get autoremove -y
     sudo apt-get clean
+}
 
-    # ── Summary ─────────────────────────────────────────────────────────────────
+# ── Full run ───────────────────────────────────────────────────────────────────
+
+cmd_run() {
+    step_update
+    step_dev_tools
+    step_nodejs
+    step_virtiofs
+    step_claude
+    step_github_cli
+    step_copilot
+    step_gemini
+    step_android_studio
+    step_qt
+    step_x11
+    step_bashrc
+    step_cleanup
 
     log_title "Provisioning complete!"
     echo
     log "Installed tools:"
     log "  - git, vim, neovim, tmux, curl, build-essential, cmake, python3"
     log "  - Node.js $(node --version)"
-    log "  - Claude CLI  →  claude"
-    log "  - GitHub CLI  →  gh"
-    log "  - GitHub Copilot  →  gh copilot suggest / gh copilot explain"
-    log "  - Android Studio  →  android-studio  (X11)"
-    log "  - Qt Creator      →  qtcreator       (X11)"
+    log "  - Claude CLI          →  claude"
+    log "  - GitHub CLI          →  gh"
+    log "  - GitHub Copilot      →  gh copilot suggest / gh copilot explain"
+    log "  - Gemini CLI          →  gemini"
+    log "  - Android Studio      →  android-studio  (X11)"
+    log "  - Qt Creator          →  qtcreator       (X11)"
     echo
     log "Reload environment: source ~/.bashrc"
     log "GUI access:         ssh -X <user>@<ip> android-studio"
@@ -302,24 +468,43 @@ COMMAND_EXPLICIT="${COMMAND_EXPLICIT:-false}"
 
 if [ "$SHOW_HELP" = "true" ]; then
     case "$COMMAND_EXPLICIT-$COMMAND" in
-        true-run) print_help_run ;;
-        *)        print_help_main ;;
+        true-run)            print_help_run ;;
+        true-update)         print_help_step update ;;
+        true-dev-tools)      print_help_step dev-tools ;;
+        true-nodejs)         print_help_step nodejs ;;
+        true-virtiofs)       print_help_step virtiofs ;;
+        true-claude)         print_help_step claude ;;
+        true-github-cli)     print_help_step github-cli ;;
+        true-copilot)        print_help_step copilot ;;
+        true-gemini)         print_help_step gemini ;;
+        true-android-studio) print_help_step android-studio ;;
+        true-qt)             print_help_step qt ;;
+        true-x11)            print_help_step x11 ;;
+        true-bashrc)         print_help_step bashrc ;;
+        true-cleanup)        print_help_step cleanup ;;
+        *)                   print_help_main ;;
     esac
     exit 0
 fi
 
 case "$COMMAND" in
     help)
-        HELP_CMD="${POSITIONAL[1]:-}"
-        case "$HELP_CMD" in
-            run) print_help_run ;;
-            *)   print_help_main ;;
-        esac
-        exit 0
+        print_help_step "${POSITIONAL[1]:-}"
         ;;
-    run)
-        cmd_run
-        ;;
+    run)            cmd_run ;;
+    update)         step_update ;;
+    dev-tools)      step_dev_tools ;;
+    nodejs)         step_nodejs ;;
+    virtiofs)       step_virtiofs ;;
+    claude)         step_claude ;;
+    github-cli)     step_github_cli ;;
+    copilot)        step_copilot ;;
+    gemini)         step_gemini ;;
+    android-studio) step_android_studio ;;
+    qt)             step_qt ;;
+    x11)            step_x11 ;;
+    bashrc)         step_bashrc ;;
+    cleanup)        step_cleanup ;;
     *)
         log_error "Unknown command: $COMMAND"
         print_help_main >&2

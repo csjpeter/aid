@@ -379,7 +379,8 @@ step_bashrc() {
     log_title "Bashrc settings"
 
     mkdir -p "$HOME/bin"
-    log "~/bin created"
+    [[ ":$PATH:" != *":$HOME/bin:"* ]] && export PATH="$HOME/bin:$PATH"
+    log "~/bin created and added to PATH"
 
     AID_MARKER="# >>> aid provision begin <<<"
     if grep -q "$AID_MARKER" "$HOME/.bashrc" 2>/dev/null; then

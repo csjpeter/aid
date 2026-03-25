@@ -80,7 +80,7 @@ EOF
 Usage: $(basename "$0") dev-tools
 
 Step 2 — Common dev tools.
-  Installs: git vim neovim tmux curl wget build-essential cmake
+  Installs: git vim neovim tmux curl wget build-essential cmake tree
             python3 python3-pip unzip zip jq xauth x11-apps openssh-server
 
 EOF
@@ -239,6 +239,7 @@ step_dev_tools() {
         unzip \
         zip \
         jq \
+        tree \
         xauth \
         x11-apps \
         openssh-server
@@ -446,7 +447,7 @@ cmd_run() {
     log_title "Provisioning complete!"
     echo
     log "Installed tools:"
-    log "  - git, vim, neovim, tmux, curl, build-essential, cmake, python3"
+    log "  - git, vim, neovim, tmux, curl, build-essential, cmake, tree, python3"
     log "  - Node.js $(node --version)"
     log "  - Claude CLI          →  claude"
     log "  - GitHub CLI          →  gh"

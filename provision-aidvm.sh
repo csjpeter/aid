@@ -178,6 +178,7 @@ Step 11 — SSH X11 forwarding.
   Sets in /etc/ssh/sshd_config:
     X11Forwarding yes
     X11UseLocalhost no
+    PermitUserEnvironment yes
   Restarts sshd.
 
 EOF
@@ -187,11 +188,14 @@ EOF
 Usage: $(basename "$0") bashrc
 
 Step 12 — Bashrc settings.
-  Appends a guarded block to ~/.bashrc (skipped if already present):
-    - Adds ~/bin and ~/.local/bin to PATH
-    - Applies host env vars from /tmp/aid-env.sh if present:
-        PS1, NAME, EMAIL, DEBFULLNAME, DEBEMAIL,
-        VISUAL, XEDITOR, EDITOR, ANDROID_HOME
+  - Creates ~/bin and ~/.local/bin
+  - Writes ~/.ssh/environment with current PATH (makes ~/bin available
+    to non-login SSH commands like: ssh <vm> provision-aidvm.sh <step>)
+  - Appends a guarded block to ~/.bashrc (skipped if already present):
+      - Adds ~/bin and ~/.local/bin to PATH
+      - Applies host env vars from /tmp/aid-env.sh if present:
+          PS1, NAME, EMAIL, DEBFULLNAME, DEBEMAIL,
+          VISUAL, XEDITOR, EDITOR, ANDROID_HOME
 
 EOF
             ;;
@@ -371,16 +375,32 @@ step_x11() {
         echo "X11UseLocalhost no" | sudo tee -a "$SSHD_CFG" > /dev/null
     fi
 
+    if grep -q "^#*PermitUserEnvironment" "$SSHD_CFG"; then
+        sudo sed -i 's/^#*PermitUserEnvironment.*/PermitUserEnvironment yes/' "$SSHD_CFG"
+    else
+        echo "PermitUserEnvironment yes" | sudo tee -a "$SSHD_CFG" > /dev/null
+    fi
+
     sudo systemctl restart ssh
     log "X11 forwarding enabled. Connect with: ssh -X user@ip"
+    log "PermitUserEnvironment enabled (reads ~/.ssh/environment)"
 }
 
 step_bashrc() {
     log_title "Bashrc settings"
 
-    mkdir -p "$HOME/bin"
+    mkdir -p "$HOME/bin" "$HOME/.local/bin"
     [[ ":$PATH:" != *":$HOME/bin:"* ]] && export PATH="$HOME/bin:$PATH"
-    log "~/bin created and added to PATH"
+    [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin:$PATH"
+    log "~/bin and ~/.local/bin created and added to PATH"
+
+    # Write ~/.ssh/environment so PATH is effective for non-login SSH commands
+    # (requires PermitUserEnvironment yes in sshd_config — set by the x11 step)
+    mkdir -p "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh"
+    echo "PATH=$PATH" > "$HOME/.ssh/environment"
+    chmod 600 "$HOME/.ssh/environment"
+    log "~/.ssh/environment written (PATH for non-login SSH sessions)"
 
     AID_MARKER="# >>> aid provision begin <<<"
     if grep -q "$AID_MARKER" "$HOME/.bashrc" 2>/dev/null; then

@@ -688,7 +688,14 @@ case "$COMMAND" in
         ;;
     provision)
         PROV_VM_NAME="${CLI_VM_NAME:-${POSITIONAL[1]:-}}"
-        PROV_STEP="${POSITIONAL[2]:-run}"
+        # If VM name was already known (from --vm-name= or vm-first reorder),
+        # the step is at POSITIONAL[1]; otherwise the VM was POSITIONAL[1]
+        # and the step is at POSITIONAL[2].
+        if [ -n "$CLI_VM_NAME" ]; then
+            PROV_STEP="${POSITIONAL[1]:-run}"
+        else
+            PROV_STEP="${POSITIONAL[2]:-run}"
+        fi
         cmd_provision "$PROV_VM_NAME" "$PROV_STEP"
         exit $?
         ;;

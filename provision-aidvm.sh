@@ -388,28 +388,32 @@ step_bashrc() {
     [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin:$PATH"
     log "~/bin and ~/.local/bin created and added to PATH"
 
-    AID_MARKER="# >>> aid provision begin <<<"
-    if grep -q "$AID_MARKER" "$HOME/.bashrc" 2>/dev/null; then
-        log "Bashrc settings already present — skipping."
-    else
-        {
-            echo ""
-            echo "# >>> aid provision begin <<<"
+    local BEGIN="# >>> aid provision begin <<<"
+    local END="# >>> aid provision end <<<"
 
-            echo '# PATH'
-            echo '[ -d "$HOME/bin" ]        && [[ ":$PATH:" != *":$HOME/bin:"*        ]] && export PATH="$HOME/bin:$PATH"'
-            echo '[ -d "$HOME/.local/bin" ] && [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin:$PATH"'
-
-            if [ -f /tmp/aid-env.sh ]; then
-                echo ""
-                echo "# Host environment"
-                cat /tmp/aid-env.sh
-            fi
-
-            echo "# >>> aid provision end <<<"
-        } >> "$HOME/.bashrc"
-        log "Bashrc settings applied."
+    # Remove existing block so we always write fresh content (makes re-runs update PS1 etc.)
+    if grep -q "$BEGIN" "$HOME/.bashrc" 2>/dev/null; then
+        sed -i "/$BEGIN/,/$END/d" "$HOME/.bashrc"
+        log "Replacing existing bashrc settings block."
     fi
+
+    {
+        echo ""
+        echo "$BEGIN"
+
+        echo '# PATH'
+        echo '[ -d "$HOME/bin" ]        && [[ ":$PATH:" != *":$HOME/bin:"*        ]] && export PATH="$HOME/bin:$PATH"'
+        echo '[ -d "$HOME/.local/bin" ] && [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin:$PATH"'
+
+        if [ -f /tmp/aid-env.sh ]; then
+            echo ""
+            echo "# Host environment"
+            cat /tmp/aid-env.sh
+        fi
+
+        echo "$END"
+    } >> "$HOME/.bashrc"
+    log "Bashrc settings applied."
 }
 
 step_cleanup() {

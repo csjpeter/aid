@@ -284,7 +284,7 @@ Copied from host on each create/sync:
 
 Host environment applied to ~/.bashrc (current values at provision time):
   - PATH additions: ~/bin, ~/.local/bin
-  - PS1, NAME, EMAIL, DEBFULLNAME, DEBEMAIL
+  - NAME, EMAIL, DEBFULLNAME, DEBEMAIL
   - VISUAL, XEDITOR, EDITOR, ANDROID_HOME
 
 Virtiofs shares (host directory → VM mountpoint):
@@ -487,7 +487,7 @@ scp_host_configs() {
     local _env_tmp
     _env_tmp=$(mktemp /tmp/aid-env-XXXXXX.sh)
     {
-        for _var in PS1 NAME EMAIL DEBFULLNAME DEBEMAIL VISUAL XEDITOR EDITOR ANDROID_HOME; do
+        for _var in NAME EMAIL DEBFULLNAME DEBEMAIL VISUAL XEDITOR EDITOR ANDROID_HOME; do
             _val="${!_var:-}"
             [ -n "$_val" ] && printf 'export %s=%s\n' "$_var" "$(printf '%q' "$_val")"
         done

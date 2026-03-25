@@ -405,6 +405,10 @@ step_bashrc() {
         echo '[ -d "$HOME/bin" ]        && [[ ":$PATH:" != *":$HOME/bin:"*        ]] && export PATH="$HOME/bin:$PATH"'
         echo '[ -d "$HOME/.local/bin" ] && [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin:$PATH"'
 
+        echo ''
+        echo '# Colored prompt'
+        echo 'export PS1='\''\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '\'''
+
         if [ -f /tmp/aid-env.sh ]; then
             echo ""
             echo "# Host environment"

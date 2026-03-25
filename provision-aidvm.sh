@@ -39,9 +39,10 @@ Individual steps (also idempotent, safe to re-run):
   cleanup          Step 13: apt autoremove + clean
 
 To run a single step on an existing VM from the host:
-  ssh <vm-ip> "provision-aidvm.sh <step>"
-  # or after manage-aidvm.sh sync <vm>:
-  ssh <vm-ip> "provision-aidvm.sh gemini"
+  ssh <vm-name> ~/bin/provision-aidvm.sh <step>
+  # sync the latest script first if needed:
+  manage-aidvm.sh sync <vm-name>
+  ssh <vm-name> ~/bin/provision-aidvm.sh gemini
 
 Environment variables (needed by some steps):
   GITHUB_PAT       Fine-grained PAT — used by github-cli step
@@ -178,7 +179,6 @@ Step 11 — SSH X11 forwarding.
   Sets in /etc/ssh/sshd_config:
     X11Forwarding yes
     X11UseLocalhost no
-    PermitUserEnvironment yes
   Restarts sshd.
 
 EOF
@@ -190,7 +190,7 @@ Usage: $(basename "$0") bashrc
 Step 12 — Bashrc settings.
   - Creates ~/bin and ~/.local/bin
   - Writes ~/.ssh/environment with current PATH (makes ~/bin available
-    to non-login SSH commands like: ssh <vm> provision-aidvm.sh <step>)
+    use: ssh <vm> ~/bin/provision-aidvm.sh <step>)
   - Appends a guarded block to ~/.bashrc (skipped if already present):
       - Adds ~/bin and ~/.local/bin to PATH
       - Applies host env vars from /tmp/aid-env.sh if present:
@@ -375,15 +375,8 @@ step_x11() {
         echo "X11UseLocalhost no" | sudo tee -a "$SSHD_CFG" > /dev/null
     fi
 
-    if grep -q "^#*PermitUserEnvironment" "$SSHD_CFG"; then
-        sudo sed -i 's/^#*PermitUserEnvironment.*/PermitUserEnvironment yes/' "$SSHD_CFG"
-    else
-        echo "PermitUserEnvironment yes" | sudo tee -a "$SSHD_CFG" > /dev/null
-    fi
-
     sudo systemctl restart ssh
     log "X11 forwarding enabled. Connect with: ssh -X user@ip"
-    log "PermitUserEnvironment enabled (reads ~/.ssh/environment)"
 }
 
 step_bashrc() {
@@ -393,14 +386,6 @@ step_bashrc() {
     [[ ":$PATH:" != *":$HOME/bin:"* ]] && export PATH="$HOME/bin:$PATH"
     [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin:$PATH"
     log "~/bin and ~/.local/bin created and added to PATH"
-
-    # Write ~/.ssh/environment so PATH is effective for non-login SSH commands
-    # (requires PermitUserEnvironment yes in sshd_config — set by the x11 step)
-    mkdir -p "$HOME/.ssh"
-    chmod 700 "$HOME/.ssh"
-    echo "PATH=$PATH" > "$HOME/.ssh/environment"
-    chmod 600 "$HOME/.ssh/environment"
-    log "~/.ssh/environment written (PATH for non-login SSH sessions)"
 
     AID_MARKER="# >>> aid provision begin <<<"
     if grep -q "$AID_MARKER" "$HOME/.bashrc" 2>/dev/null; then

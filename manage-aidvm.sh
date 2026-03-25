@@ -482,7 +482,7 @@ cmd_sync() {
         "$provision_script" \
         "${VM_ADMIN_USER}@${VM_IP}:~/bin/provision-aidvm.sh"
     log_info "Done. Run individual steps with:"
-    log_info "  ssh ${VM_ADMIN_USER}@${VM_IP} provision-aidvm.sh <step>"
+    log_info "  ssh ${VM_ADMIN_USER}@${VM_IP} ~/bin/provision-aidvm.sh <step>"
 }
 
 save_config() {

@@ -54,7 +54,7 @@ Options:
 
 Examples:
   $(basename "$0") setup-server
-  $(basename "$0") setup-server --external-host=<external-host> --external-port=<external-port>
+  $(basename "$0") setup-server --external-host=<external-host> --external-port=<port>
 
 EOF
 }
@@ -82,7 +82,7 @@ Options:
 Examples:
   $(basename "$0") setup-client \\
       --local-host=<local-host> \\
-      --external-host=<external-host> --external-port=<external-port>
+      --external-host=<external-host> --external-port=<port>
 
 EOF
 }

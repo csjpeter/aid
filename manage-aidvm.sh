@@ -634,6 +634,16 @@ done
 
 # ── Command dispatch ───────────────────────────────────────────────────────────
 
+# If the first positional argument is not a known command, treat it as the VM name.
+# This allows both orderings:
+#   manage-aidvm.sh aidvm2 provision gemini
+#   manage-aidvm.sh provision aidvm2 gemini
+_KNOWN_COMMANDS=" create provision list status delete sync help "
+if [ ${#POSITIONAL[@]} -gt 0 ] && [[ "$_KNOWN_COMMANDS" != *" ${POSITIONAL[0]} "* ]]; then
+    [ -z "$CLI_VM_NAME" ] && CLI_VM_NAME="${POSITIONAL[0]}"
+    POSITIONAL=("${POSITIONAL[@]:1}")
+fi
+
 COMMAND="${POSITIONAL[0]:-help}"
 COMMAND_EXPLICIT="${POSITIONAL[0]:+true}"
 COMMAND_EXPLICIT="${COMMAND_EXPLICIT:-false}"

@@ -124,6 +124,7 @@ Manage KVM-based AI developer VMs.
 Commands:
   create          Collect config, create, and provision a new VM
   provision       Run provisioning steps on an existing VM
+  virtiofs        Attach missing virtiofs shares to an existing VM
   list            List all configured VMs with their IP address and virsh status
   status          Show detailed status of a VM (state, shares, SSH)
   delete          Stop and permanently delete a VM and its disk (config preserved)
@@ -188,6 +189,26 @@ and current virsh status.
 
 Examples:
   $(basename "$0") list
+
+EOF
+}
+
+print_help_virtiofs() {
+    cat <<EOF
+Usage: $(basename "$0") virtiofs [vm-name]
+
+Attach any missing virtiofs shares to an existing VM and restart it if needed.
+Shares configured:
+  claude      → ~/.claude
+  gemini      → ~/.gemini
+  copilot     → ~/.copilot
+  nvim-config → ~/.config/nvim
+
+Only works when KVM_HOST=local. Idempotent — already-attached shares are skipped.
+
+Examples:
+  $(basename "$0") virtiofs aidvm2
+  $(basename "$0") aidvm2 virtiofs
 
 EOF
 }
@@ -480,6 +501,81 @@ scp_host_configs() {
     fi
 }
 
+cmd_virtiofs() {
+    local vm_name="${1:-}"
+
+    if [ -z "$vm_name" ]; then
+        cmd_list
+        echo
+        ask_optional "VM name" vm_name
+    fi
+    if [ -z "$vm_name" ]; then
+        log_error "No VM name specified."
+        exit 1
+    fi
+
+    local conf="$CONFIG_DIR/${vm_name}.conf"
+    if [ ! -f "$conf" ]; then
+        log_error "No config found for '$vm_name' at $conf."
+        exit 1
+    fi
+    local VM_NAME VM_IP VM_ADMIN_USER KVM_HOST
+    # shellcheck disable=SC1090
+    source "$conf"
+
+    if [ "$KVM_HOST" != "local" ]; then
+        log_warn "Virtiofs shares require KVM_HOST=local. '$VM_NAME' uses a remote KVM host — skipping."
+        return 0
+    fi
+
+    log_title "Checking virtiofs shares for $VM_NAME"
+    mkdir -p "$HOME/.claude" "$HOME/.gemini" "$HOME/.copilot" "$HOME/.config/nvim"
+    local INACTIVE_XML SHARES_CHANGED=false
+    INACTIVE_XML=$(sudo virsh dumpxml --inactive "$VM_NAME" 2>/dev/null)
+
+    for spec in \
+        "claude:$HOME/.claude" \
+        "gemini:$HOME/.gemini" \
+        "copilot:$HOME/.copilot" \
+        "nvim-config:$HOME/.config/nvim"
+    do
+        local tag="${spec%%:*}" path="${spec#*:}"
+        if echo "$INACTIVE_XML" | grep -q "target dir='${tag}'"; then
+            log_info "Share '${tag}' already configured."
+        else
+            "$KVM_DIR/kvm-share.sh" attach "$VM_NAME" "$path" "$tag"
+            SHARES_CHANGED=true
+        fi
+    done
+
+    if [ "$SHARES_CHANGED" = "true" ]; then
+        log_info "Restarting VM to activate new virtiofs shares..."
+        sudo virsh shutdown "$VM_NAME" 2>/dev/null || true
+        local SHUTDOWN_WAIT=0
+        while [ $SHUTDOWN_WAIT -lt 30 ]; do
+            [ "$(sudo virsh domstate "$VM_NAME" 2>/dev/null)" != "running" ] && break
+            sleep 1
+            SHUTDOWN_WAIT=$((SHUTDOWN_WAIT + 1))
+        done
+        [ "$(sudo virsh domstate "$VM_NAME" 2>/dev/null)" = "running" ] \
+            && sudo virsh destroy "$VM_NAME"
+        sudo virsh start "$VM_NAME"
+
+        log_info "Waiting for SSH after restart (up to 120s)..."
+        local SSH_DEADLINE=$(($(date +%s) + 120))
+        while [ "$(date +%s)" -lt "$SSH_DEADLINE" ]; do
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+                    "${VM_ADMIN_USER}@${VM_IP}" true &>/dev/null 2>&1; then
+                log_info "SSH available on ${VM_NAME}."
+                break
+            fi
+            sleep 3
+        done
+    else
+        log_info "All shares already configured — no restart needed."
+    fi
+}
+
 cmd_sync() {
     local vm_name="${1:-}"
 
@@ -638,7 +734,7 @@ done
 # This allows both orderings:
 #   manage-aidvm.sh aidvm2 provision gemini
 #   manage-aidvm.sh provision aidvm2 gemini
-_KNOWN_COMMANDS=" create provision list status delete sync help "
+_KNOWN_COMMANDS=" create provision virtiofs list status delete sync help "
 if [ ${#POSITIONAL[@]} -gt 0 ] && [[ "$_KNOWN_COMMANDS" != *" ${POSITIONAL[0]} "* ]]; then
     [ -z "$CLI_VM_NAME" ] && CLI_VM_NAME="${POSITIONAL[0]}"
     POSITIONAL=("${POSITIONAL[@]:1}")
@@ -653,6 +749,7 @@ if [ "$SHOW_HELP" = "true" ]; then
     case "$COMMAND_EXPLICIT-$COMMAND" in
         true-create)    print_help_create ;;
         true-provision) print_help_provision ;;
+        true-virtiofs)  print_help_virtiofs ;;
         true-list)      print_help_list ;;
         true-delete)    print_help_delete ;;
         true-sync)      print_help_sync ;;
@@ -668,6 +765,7 @@ case "$COMMAND" in
         case "$HELP_CMD" in
             create)    print_help_create ;;
             provision) print_help_provision ;;
+            virtiofs)  print_help_virtiofs ;;
             list)      print_help_list ;;
             delete)    print_help_delete ;;
             sync)      print_help_sync ;;
@@ -684,6 +782,11 @@ case "$COMMAND" in
     delete)
         DELETE_VM_NAME="${CLI_VM_NAME:-${POSITIONAL[1]:-}}"
         cmd_delete "$DELETE_VM_NAME" "$BATCH"
+        exit $?
+        ;;
+    virtiofs)
+        VFS_VM_NAME="${CLI_VM_NAME:-${POSITIONAL[1]:-}}"
+        cmd_virtiofs "$VFS_VM_NAME"
         exit $?
         ;;
     provision)
@@ -947,66 +1050,7 @@ fi
 
 # ── Phase 3.5: Virtiofs shares (local only) ────────────────────────────────────
 
-SHARES_CHANGED=false
-
-if [ "$KVM_HOST" == "local" ]; then
-    log_title "Checking virtiofs shares"
-    mkdir -p "$HOME/.claude" "$HOME/.gemini" "$HOME/.copilot" "$HOME/.config/nvim"
-    INACTIVE_XML=$(sudo virsh dumpxml --inactive "$VM_NAME" 2>/dev/null)
-
-    if echo "$INACTIVE_XML" | grep -q "target dir='claude'"; then
-        log_info "Share 'claude' already configured."
-    else
-        "$KVM_DIR/kvm-share.sh" attach "$VM_NAME" "$HOME/.claude" "claude"
-        SHARES_CHANGED=true
-    fi
-
-    if echo "$INACTIVE_XML" | grep -q "target dir='gemini'"; then
-        log_info "Share 'gemini' already configured."
-    else
-        "$KVM_DIR/kvm-share.sh" attach "$VM_NAME" "$HOME/.gemini" "gemini"
-        SHARES_CHANGED=true
-    fi
-
-    if echo "$INACTIVE_XML" | grep -q "target dir='copilot'"; then
-        log_info "Share 'copilot' already configured."
-    else
-        "$KVM_DIR/kvm-share.sh" attach "$VM_NAME" "$HOME/.copilot" "copilot"
-        SHARES_CHANGED=true
-    fi
-
-    if echo "$INACTIVE_XML" | grep -q "target dir='nvim-config'"; then
-        log_info "Share 'nvim-config' already configured."
-    else
-        "$KVM_DIR/kvm-share.sh" attach "$VM_NAME" "$HOME/.config/nvim" "nvim-config"
-        SHARES_CHANGED=true
-    fi
-
-    if [ "$SHARES_CHANGED" = "true" ]; then
-        log_info "Restarting VM to activate new virtiofs shares..."
-        sudo virsh shutdown "$VM_NAME" 2>/dev/null || true
-        SHUTDOWN_WAIT=0
-        while [ $SHUTDOWN_WAIT -lt 30 ]; do
-            [ "$(sudo virsh domstate "$VM_NAME" 2>/dev/null)" != "running" ] && break
-            sleep 1
-            SHUTDOWN_WAIT=$((SHUTDOWN_WAIT + 1))
-        done
-        [ "$(sudo virsh domstate "$VM_NAME" 2>/dev/null)" = "running" ] \
-            && sudo virsh destroy "$VM_NAME"
-        sudo virsh start "$VM_NAME"
-
-        log_info "Waiting for SSH after restart (up to 120s)..."
-        SSH_DEADLINE=$(($(date +%s) + 120))
-        while [ "$(date +%s)" -lt "$SSH_DEADLINE" ]; do
-            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
-                    "${VM_ADMIN_USER}@${VM_IP}" true &>/dev/null 2>&1; then
-                log_info "SSH available on ${VM_NAME}."
-                break
-            fi
-            sleep 3
-        done
-    fi
-fi
+cmd_virtiofs "$VM_NAME"
 
 # ── Phase 4: Provision ─────────────────────────────────────────────────────────
 

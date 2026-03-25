@@ -123,6 +123,7 @@ Manage KVM-based AI developer VMs.
 
 Commands:
   create          Collect config, create, and provision a new VM
+  provision       Run provisioning steps on an existing VM
   list            List all configured VMs with their IP address and virsh status
   status          Show detailed status of a VM (state, shares, SSH)
   delete          Stop and permanently delete a VM and its disk (config preserved)
@@ -187,6 +188,40 @@ and current virsh status.
 
 Examples:
   $(basename "$0") list
+
+EOF
+}
+
+print_help_provision() {
+    cat <<EOF
+Usage: $(basename "$0") provision [vm-name] [step] [OPTIONS]
+
+Sync the provision script to a VM and execute a provisioning step.
+All steps are idempotent — safe to re-run on an already-provisioned VM.
+
+Steps (default: run):
+  run            All steps in sequence
+  update         Step  1: apt update + upgrade
+  dev-tools      Step  2: common dev packages (git vim neovim tmux curl …)
+  nodejs         Step  3: Node.js LTS via nodesource
+  virtiofs       Step  4: virtiofs shared directory mounts
+  claude         Step  5: Claude CLI + ANTHROPIC_API_KEY
+  github-cli     Step  6: GitHub CLI (apt) + gh auth login
+  copilot        Step  7: GitHub Copilot CLI
+  gemini         Step  8: Google Gemini CLI (npm)
+  android-studio Step  9: Android Studio (snap)
+  qt             Step 10: Qt 6 + Qt Creator (apt)
+  x11            Step 11: SSH X11 forwarding
+  bashrc         Step 12: PATH + host env vars in ~/.bashrc
+  cleanup        Step 13: apt autoremove + clean
+
+Options:
+  --vm-name=<name>   VM to provision (alternative to positional argument)
+
+Examples:
+  $(basename "$0") provision aidvm2
+  $(basename "$0") provision aidvm2 gemini
+  $(basename "$0") provision aidvm2 run
 
 EOF
 }
@@ -486,6 +521,54 @@ cmd_sync() {
     log_info "  ssh ${VM_ADMIN_USER}@${VM_IP} ~/bin/provision-aidvm.sh <step>"
 }
 
+cmd_provision() {
+    local vm_name="${1:-}"
+    local step="${2:-run}"
+
+    if [ -z "$vm_name" ]; then
+        cmd_list
+        echo
+        ask_optional "VM name to provision" vm_name
+    fi
+    if [ -z "$vm_name" ]; then
+        log_error "No VM name specified."
+        exit 1
+    fi
+
+    local conf="$CONFIG_DIR/${vm_name}.conf"
+    if [ ! -f "$conf" ]; then
+        log_error "No config found for '$vm_name' at $conf."
+        exit 1
+    fi
+    local VM_NAME VM_IP VM_ADMIN_USER GITHUB_PAT CLAUDE_API_KEY
+    # shellcheck disable=SC1090
+    source "$conf"
+
+    if ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            "${VM_ADMIN_USER}@${VM_IP}" true &>/dev/null 2>&1; then
+        log_error "Cannot reach ${VM_ADMIN_USER}@${VM_IP}."
+        exit 1
+    fi
+
+    log_title "Provisioning $vm_name ($VM_IP) — step: $step"
+
+    log_info "Syncing provision script to ~/bin/..."
+    ssh -o StrictHostKeyChecking=no "${VM_ADMIN_USER}@${VM_IP}" "mkdir -p ~/bin"
+    scp -o StrictHostKeyChecking=no \
+        "$SCRIPT_DIR/provision-aidvm.sh" \
+        "${VM_ADMIN_USER}@${VM_IP}:~/bin/provision-aidvm.sh"
+
+    log_info "Syncing host configs..."
+    scp_host_configs "$VM_ADMIN_USER" "$VM_IP"
+
+    log_info "Running step: $step"
+    ssh -o StrictHostKeyChecking=no \
+        "${VM_ADMIN_USER}@${VM_IP}" \
+        "GITHUB_PAT='${GITHUB_PAT:-}' CLAUDE_API_KEY='${CLAUDE_API_KEY:-}' ~/bin/provision-aidvm.sh $step"
+
+    log_info "Done."
+}
+
 save_config() {
     mkdir -p "$CONFIG_DIR"
     cat > "$CONFIG_FILE" << CONF
@@ -558,12 +641,13 @@ COMMAND_EXPLICIT="${COMMAND_EXPLICIT:-false}"
 # --help / -h: show command-specific help if a command was given, else main help
 if [ "$SHOW_HELP" = "true" ]; then
     case "$COMMAND_EXPLICIT-$COMMAND" in
-        true-create) print_help_create ;;
-        true-list)   print_help_list ;;
-        true-delete) print_help_delete ;;
-        true-sync)   print_help_sync ;;
-        true-status) print_help_status ;;
-        *)           print_help_main ;;
+        true-create)    print_help_create ;;
+        true-provision) print_help_provision ;;
+        true-list)      print_help_list ;;
+        true-delete)    print_help_delete ;;
+        true-sync)      print_help_sync ;;
+        true-status)    print_help_status ;;
+        *)              print_help_main ;;
     esac
     exit 0
 fi
@@ -572,13 +656,14 @@ case "$COMMAND" in
     help)
         HELP_CMD="${POSITIONAL[1]:-}"
         case "$HELP_CMD" in
-            create) print_help_create ;;
-            list)   print_help_list ;;
-            delete) print_help_delete ;;
-            sync)   print_help_sync ;;
-            status) print_help_status ;;
-            vm)     print_help_vm ;;
-            *)      print_help_main ;;
+            create)    print_help_create ;;
+            provision) print_help_provision ;;
+            list)      print_help_list ;;
+            delete)    print_help_delete ;;
+            sync)      print_help_sync ;;
+            status)    print_help_status ;;
+            vm)        print_help_vm ;;
+            *)         print_help_main ;;
         esac
         exit 0
         ;;
@@ -589,6 +674,12 @@ case "$COMMAND" in
     delete)
         DELETE_VM_NAME="${CLI_VM_NAME:-${POSITIONAL[1]:-}}"
         cmd_delete "$DELETE_VM_NAME" "$BATCH"
+        exit $?
+        ;;
+    provision)
+        PROV_VM_NAME="${CLI_VM_NAME:-${POSITIONAL[1]:-}}"
+        PROV_STEP="${POSITIONAL[2]:-run}"
+        cmd_provision "$PROV_VM_NAME" "$PROV_STEP"
         exit $?
         ;;
     sync)

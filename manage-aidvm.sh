@@ -233,6 +233,7 @@ Host environment applied to ~/.bashrc (current values at provision time):
 
 Virtiofs shares (host directory → VM mountpoint):
   - ~/.claude       →  ~/.claude        (tag: claude)
+  - ~/.gemini       →  ~/.gemini        (tag: gemini)
   - ~/.copilot      →  ~/.copilot       (tag: copilot)
   - ~/.config/nvim  →  ~/.config/nvim   (tag: nvim-config)
 
@@ -842,13 +843,20 @@ SHARES_CHANGED=false
 
 if [ "$KVM_HOST" == "local" ]; then
     log_title "Checking virtiofs shares"
-    mkdir -p "$HOME/.claude" "$HOME/.copilot" "$HOME/.config/nvim"
+    mkdir -p "$HOME/.claude" "$HOME/.gemini" "$HOME/.copilot" "$HOME/.config/nvim"
     INACTIVE_XML=$(sudo virsh dumpxml --inactive "$VM_NAME" 2>/dev/null)
 
     if echo "$INACTIVE_XML" | grep -q "target dir='claude'"; then
         log_info "Share 'claude' already configured."
     else
         "$KVM_DIR/kvm-share.sh" attach "$VM_NAME" "$HOME/.claude" "claude"
+        SHARES_CHANGED=true
+    fi
+
+    if echo "$INACTIVE_XML" | grep -q "target dir='gemini'"; then
+        log_info "Share 'gemini' already configured."
+    else
+        "$KVM_DIR/kvm-share.sh" attach "$VM_NAME" "$HOME/.gemini" "gemini"
         SHARES_CHANGED=true
     fi
 

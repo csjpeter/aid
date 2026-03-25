@@ -102,6 +102,7 @@ Usage: $(basename "$0") virtiofs
 Step 4 — Virtiofs shared directory mounts.
   Tags and mount points:
     claude      → ~/.claude
+    gemini      → ~/.gemini
     copilot     → ~/.copilot
     nvim-config → ~/.config/nvim
 
@@ -256,7 +257,7 @@ step_virtiofs() {
     log_title "Virtiofs shared directories"
     sudo modprobe virtiofs 2>/dev/null || true
 
-    for spec in "claude:$HOME/.claude" "copilot:$HOME/.copilot" "nvim-config:$HOME/.config/nvim"; do
+    for spec in "claude:$HOME/.claude" "gemini:$HOME/.gemini" "copilot:$HOME/.copilot" "nvim-config:$HOME/.config/nvim"; do
         tag="${spec%%:*}"
         mp="${spec#*:}"
         mkdir -p "$mp"

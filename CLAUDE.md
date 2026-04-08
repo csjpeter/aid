@@ -27,7 +27,7 @@ Included as a git submodule at `kvm/`. Always study these before modifying VM cr
 - GitHub authentication uses fine-grained PAT (not classic token)
 - Claude CLI installed via `curl -fsSL https://claude.ai/install.sh | bash` (not npm)
 - GitHub Copilot CLI installed via `curl -fsSL https://gh.io/copilot-install | bash` (not gh extension)
-- `~/.claude` and `~/.copilot` shared host→guest via virtiofs (`kvm-share.sh`); tags: `claude`, `copilot`
+- `~/.claude`, `~/.local/share/claude-userdata` and `~/.copilot` shared host→guest via virtiofs (`kvm-share.sh`); tags: `claude`, `claude-userdata`, `copilot`
 - `~/.claude.json` copied to VM via SCP on every `create` run (single file, not virtiofs-shareable)
 - Virtiofs requires shared memory backing (memfd); `kvm-share.sh attach` configures this automatically
 - Android Studio installed via `snap install android-studio --classic`

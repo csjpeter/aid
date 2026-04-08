@@ -199,10 +199,11 @@ Usage: $(basename "$0") virtiofs [vm-name]
 
 Attach any missing virtiofs shares to an existing VM and restart it if needed.
 Shares configured:
-  claude      → ~/.claude
-  gemini      → ~/.gemini
-  copilot     → ~/.copilot
-  nvim-config → ~/.config/nvim
+  claude          → ~/.claude
+  claude-userdata → ~/.local/share/claude-userdata
+  gemini          → ~/.gemini
+  copilot         → ~/.copilot
+  nvim-config     → ~/.config/nvim
 
 Only works when KVM_HOST=local. Idempotent — already-attached shares are skipped.
 
@@ -288,10 +289,11 @@ Host environment applied to ~/.bashrc (current values at provision time):
   - VISUAL, XEDITOR, EDITOR, ANDROID_HOME
 
 Virtiofs shares (host directory → VM mountpoint):
-  - ~/.claude       →  ~/.claude        (tag: claude)
-  - ~/.gemini       →  ~/.gemini        (tag: gemini)
-  - ~/.copilot      →  ~/.copilot       (tag: copilot)
-  - ~/.config/nvim  →  ~/.config/nvim   (tag: nvim-config)
+  - ~/.claude                       →  ~/.claude                       (tag: claude)
+  - ~/.local/share/claude-userdata  →  ~/.local/share/claude-userdata  (tag: claude-userdata)
+  - ~/.gemini                       →  ~/.gemini                       (tag: gemini)
+  - ~/.copilot                      →  ~/.copilot                      (tag: copilot)
+  - ~/.config/nvim                  →  ~/.config/nvim                  (tag: nvim-config)
 
 EOF
 }
@@ -469,7 +471,7 @@ cmd_status() {
         echo
         echo "  Mount status inside VM:"
         ssh -o StrictHostKeyChecking=no "${VM_ADMIN_USER}@${VM_IP}" \
-            'for mp in ~/.claude ~/.copilot ~/.config/nvim; do
+            'for mp in ~/.claude ~/.local/share/claude-userdata ~/.gemini ~/.copilot ~/.config/nvim; do
                 if mountpoint -q "$mp" 2>/dev/null; then
                     printf "    %-30s mounted\n" "$mp"
                 else
@@ -529,12 +531,13 @@ cmd_virtiofs() {
     fi
 
     log_title "Checking virtiofs shares for $VM_NAME"
-    mkdir -p "$HOME/.claude" "$HOME/.gemini" "$HOME/.copilot" "$HOME/.config/nvim"
+    mkdir -p "$HOME/.claude" "$HOME/.local/share/claude-userdata" "$HOME/.gemini" "$HOME/.copilot" "$HOME/.config/nvim"
     local INACTIVE_XML SHARES_CHANGED=false
     INACTIVE_XML=$(sudo virsh dumpxml --inactive "$VM_NAME" 2>/dev/null)
 
     for spec in \
         "claude:$HOME/.claude" \
+        "claude-userdata:$HOME/.local/share/claude-userdata" \
         "gemini:$HOME/.gemini" \
         "copilot:$HOME/.copilot" \
         "nvim-config:$HOME/.config/nvim"

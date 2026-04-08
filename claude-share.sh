@@ -24,14 +24,15 @@ print_help_main() {
     cat <<EOF
 Usage: $(basename "$0") <command> [OPTIONS]
 
-Share ~/.claude from the desktop to other machines via sshfs.
+Share ~/.claude and ~/.local/share/claude-userdata from the desktop to other
+machines via sshfs.
 The SSH connection auto-selects local or external hostname based on reachability.
 
 Commands:
   setup-server   Verify server-side prerequisites and print client connection info
-  setup-client   Install sshfs, SSH alias, and systemd mount service on this machine
-  mount          Mount ~/.claude from the desktop (client only)
-  umount         Unmount ~/.claude (client only)
+  setup-client   Install sshfs, SSH alias, and systemd mount services on this machine
+  mount          Mount shared directories from the desktop (client only)
+  umount         Unmount shared directories (client only)
   sync-json      Sync ~/.claude.json with the desktop (newer side wins)
   status         Show connection and mount status
   help [cmd]     Show this help, or detailed help for a command (default)
@@ -46,7 +47,8 @@ print_help_setup_server() {
 Usage: $(basename "$0") setup-server [OPTIONS]
 
 Run on the desktop machine. Verifies that sshd is running and ~/.claude
-exists, then prints the connection details to use on the client.
+and ~/.local/share/claude-userdata exist, then prints the connection
+details to use on the client.
 
 Options:
   --local-host=<host>      Hostname on the home network  (default: auto-detected)
@@ -69,8 +71,10 @@ Run on the client machine (laptop). Does the following:
   2. Adds a '${CLI_SSH_ALIAS:-desktop}' alias to ~/.ssh/config that automatically
      connects via the local hostname when at home, and the external
      hostname+port when away — no manual switching needed
-  3. Backs up any existing ~/.claude content and prepares the mount point
-  4. Installs and enables a systemd user service for automatic mounting at login
+  3. Backs up any existing ~/.claude and ~/.local/share/claude-userdata
+     content and prepares the mount points
+  4. Installs and enables systemd user services for automatic mounting at login
+     (claude-mount.service and claude-userdata-mount.service)
 
 Options:
   --desktop-user=<user>    SSH username on the desktop    (default: \$USER)
@@ -91,8 +95,8 @@ print_help_mount() {
     cat <<EOF
 Usage: $(basename "$0") mount
 
-Mount ~/.claude from the desktop on this machine.
-Uses the systemd user service if available, otherwise runs sshfs directly.
+Mount ~/.claude and ~/.local/share/claude-userdata from the desktop on
+this machine. Uses systemd user services if available.
 
 Examples:
   $(basename "$0") mount
@@ -104,7 +108,7 @@ print_help_umount() {
     cat <<EOF
 Usage: $(basename "$0") umount
 
-Unmount ~/.claude on this machine.
+Unmount ~/.claude and ~/.local/share/claude-userdata on this machine.
 
 Examples:
   $(basename "$0") umount
@@ -161,6 +165,14 @@ cmd_setup_server() {
         log_warn "~/.claude does not exist yet — it will be created when Claude CLI first runs."
         mkdir -p "$HOME/.claude"
         log_info "~/.claude: created"
+    fi
+
+    # Verify ~/.local/share/claude-userdata exists
+    if [ -d "$HOME/.local/share/claude-userdata" ]; then
+        log_info "~/.local/share/claude-userdata: exists"
+    else
+        mkdir -p "$HOME/.local/share/claude-userdata"
+        log_info "~/.local/share/claude-userdata: created"
     fi
 
     # Detect local hostname
@@ -258,18 +270,21 @@ EOF
         [ -n "$external_host" ] && log_info "  away: ${external_host}:${external_port}"
     fi
 
-    # ── Mount point ────────────────────────────────────────────────────────────
-    log_info "Preparing mount point $mount_point..."
-    if mountpoint -q "$mount_point" 2>/dev/null; then
-        log_info "$mount_point is already mounted."
-    elif [ -d "$mount_point" ] && [ -n "$(ls -A "$mount_point" 2>/dev/null)" ]; then
-        log_warn "$mount_point is non-empty — backing up to ${mount_point}.bak"
-        mv "$mount_point" "${mount_point}.bak"
-        mkdir -p "$mount_point"
-    else
-        mkdir -p "$mount_point"
-        log_info "$mount_point ready."
-    fi
+    # ── Mount points ───────────────────────────────────────────────────────────
+    local userdata_point="$HOME/.local/share/claude-userdata"
+    for mp in "$mount_point" "$userdata_point"; do
+        log_info "Preparing mount point $mp..."
+        if mountpoint -q "$mp" 2>/dev/null; then
+            log_info "$mp is already mounted."
+        elif [ -d "$mp" ] && [ -n "$(ls -A "$mp" 2>/dev/null)" ]; then
+            log_warn "$mp is non-empty — backing up to ${mp}.bak"
+            mv "$mp" "${mp}.bak"
+            mkdir -p "$mp"
+        else
+            mkdir -p "$mp"
+            log_info "$mp ready."
+        fi
+    done
 
     # ── Systemd user service ───────────────────────────────────────────────────
     log_info "Installing systemd user service..."
@@ -294,56 +309,87 @@ ExecStop=/usr/bin/fusermount -u %h/.claude
 WantedBy=default.target
 EOF
 
+    local userdata_service_file="$service_dir/claude-userdata-mount.service"
+    cat > "$userdata_service_file" << EOF
+[Unit]
+Description=Mount ~/.local/share/claude-userdata from desktop via sshfs
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/bin/mkdir -p %h/.local/share/claude-userdata
+ExecStart=/usr/bin/sshfs ${ssh_alias}:.local/share/claude-userdata %h/.local/share/claude-userdata \
+    -o reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,follow_symlinks
+ExecStop=/usr/bin/fusermount -u %h/.local/share/claude-userdata
+
+[Install]
+WantedBy=default.target
+EOF
+
     systemctl --user daemon-reload
     systemctl --user enable claude-mount.service
-    log_info "Service enabled (claude-mount.service)."
+    systemctl --user enable claude-userdata-mount.service
+    log_info "Services enabled (claude-mount.service, claude-userdata-mount.service)."
 
     # ── Test and mount ─────────────────────────────────────────────────────────
     log_info "Testing SSH connection to '${ssh_alias}'..."
     if ssh -o ConnectTimeout=10 -o BatchMode=yes "${ssh_alias}" true 2>/dev/null; then
         log_info "SSH connection OK."
-        if mountpoint -q "$mount_point" 2>/dev/null; then
-            log_info "$mount_point already mounted."
-        else
-            systemctl --user start claude-mount.service
-            log_info "$mount_point mounted."
-        fi
+        for svc_mp in "claude-mount.service:$mount_point" "claude-userdata-mount.service:$userdata_point"; do
+            local svc="${svc_mp%%:*}" mp="${svc_mp#*:}"
+            if mountpoint -q "$mp" 2>/dev/null; then
+                log_info "$mp already mounted."
+            else
+                systemctl --user start "$svc"
+                log_info "$mp mounted."
+            fi
+        done
     else
         log_warn "Could not reach '${ssh_alias}' right now."
         log_info "Mount manually once connected:  $(basename "$0") mount"
     fi
 
     echo
-    log_info "Done. ~/.claude is now served from ${desktop_user}@${ssh_alias}:~/.claude"
+    log_info "Done. Shared directories served from ${desktop_user}@${ssh_alias}:"
+    log_info "  ~/.claude                       → ~/.claude"
+    log_info "  ~/.local/share/claude-userdata   → ~/.local/share/claude-userdata"
     [ -n "$local_host" ] && [ -n "$external_host" ] && \
         log_info "SSH switches automatically between home (${local_host}) and away (${external_host}:${external_port})."
 }
 
 cmd_mount() {
-    if mountpoint -q "$HOME/.claude" 2>/dev/null; then
-        log_info "~/.claude is already mounted."
-        return
-    fi
-    if systemctl --user cat claude-mount.service &>/dev/null 2>&1; then
-        systemctl --user start claude-mount.service
-        log_info "~/.claude mounted via systemd service."
-    else
-        log_error "claude-mount.service not found. Run '$(basename "$0") setup-client' first."
-        exit 1
-    fi
+    local any_mounted=false
+    for svc_mp in "claude-mount.service:$HOME/.claude" "claude-userdata-mount.service:$HOME/.local/share/claude-userdata"; do
+        local svc="${svc_mp%%:*}" mp="${svc_mp#*:}"
+        if mountpoint -q "$mp" 2>/dev/null; then
+            log_info "$mp is already mounted."
+            any_mounted=true
+        elif systemctl --user cat "$svc" &>/dev/null 2>&1; then
+            systemctl --user start "$svc"
+            log_info "$mp mounted via systemd service."
+            any_mounted=true
+        else
+            log_warn "$svc not found — run '$(basename "$0") setup-client' first."
+        fi
+    done
+    [ "$any_mounted" = "false" ] && { log_error "No mount services found."; exit 1; }
 }
 
 cmd_umount() {
-    if ! mountpoint -q "$HOME/.claude" 2>/dev/null; then
-        log_info "~/.claude is not mounted."
-        return
-    fi
-    if systemctl --user cat claude-mount.service &>/dev/null 2>&1; then
-        systemctl --user stop claude-mount.service
-    else
-        fusermount -u "$HOME/.claude"
-    fi
-    log_info "~/.claude unmounted."
+    for svc_mp in "claude-mount.service:$HOME/.claude" "claude-userdata-mount.service:$HOME/.local/share/claude-userdata"; do
+        local svc="${svc_mp%%:*}" mp="${svc_mp#*:}"
+        if ! mountpoint -q "$mp" 2>/dev/null; then
+            log_info "$mp is not mounted."
+            continue
+        fi
+        if systemctl --user cat "$svc" &>/dev/null 2>&1; then
+            systemctl --user stop "$svc"
+        else
+            fusermount -u "$mp"
+        fi
+        log_info "$mp unmounted."
+    done
 }
 
 cmd_sync_json() {
@@ -401,22 +447,24 @@ cmd_status() {
     log_title "Claude share status"
 
     # Mount status
-    if mountpoint -q "$HOME/.claude" 2>/dev/null; then
-        log_info "~/.claude: mounted"
-    elif [ -d "$HOME/.claude" ]; then
-        log_warn "~/.claude: directory exists but not mounted"
-    else
-        log_warn "~/.claude: does not exist"
-    fi
-
-    # Systemd service
-    if systemctl --user cat claude-mount.service &>/dev/null 2>&1; then
-        local svc_state
-        svc_state=$(systemctl --user is-active claude-mount.service 2>/dev/null || echo "inactive")
-        log_info "claude-mount.service: $svc_state"
-    else
-        log_info "claude-mount.service: not installed"
-    fi
+    for dir_svc in "$HOME/.claude:claude-mount.service" "$HOME/.local/share/claude-userdata:claude-userdata-mount.service"; do
+        local dir="${dir_svc%%:*}" svc="${dir_svc#*:}"
+        local short_dir="${dir#"$HOME"/}"
+        if mountpoint -q "$dir" 2>/dev/null; then
+            log_info "~/$short_dir: mounted"
+        elif [ -d "$dir" ]; then
+            log_warn "~/$short_dir: directory exists but not mounted"
+        else
+            log_warn "~/$short_dir: does not exist"
+        fi
+        if systemctl --user cat "$svc" &>/dev/null 2>&1; then
+            local svc_state
+            svc_state=$(systemctl --user is-active "$svc" 2>/dev/null || echo "inactive")
+            log_info "$svc: $svc_state"
+        else
+            log_info "$svc: not installed"
+        fi
+    done
 
     # SSH alias reachability
     local ssh_alias="${CLI_SSH_ALIAS:-desktop}"

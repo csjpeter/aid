@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tiered backup of ~/.claude to ~/backup/claude.
+# Tiered backup of ~/.claude and ~/.local/share/claude-userdata.
 # Retention: hourly (24 h), daily (7 d), weekly (4 w), monthly (12 m).
 # Uses rsync --link-dest for space-efficient snapshots.
 set -euo pipefail
@@ -12,13 +12,11 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 # ── Defaults ───────────────────────────────────────────────────────────────────
 
-SOURCE_DIR="$HOME/.claude"
-BACKUP_ROOT="${BACKUP_ROOT:-$HOME/backup/claude}"
-
-HOURLY_DIR="$BACKUP_ROOT/hourly"
-DAILY_DIR="$BACKUP_ROOT/daily"
-WEEKLY_DIR="$BACKUP_ROOT/weekly"
-MONTHLY_DIR="$BACKUP_ROOT/monthly"
+# Each entry: source_dir:backup_root
+BACKUP_TARGETS=(
+    "$HOME/.claude:${BACKUP_ROOT:-$HOME/backup/claude}"
+    "$HOME/.local/share/claude-userdata:${BACKUP_ROOT_USERDATA:-$HOME/backup/claude-userdata}"
+)
 
 HOURLY_KEEP=24
 DAILY_KEEP=7
@@ -31,7 +29,7 @@ print_help_main() {
     cat <<EOF
 Usage: $(basename "$0") <command> [OPTIONS]
 
-Tiered backup of ~/.claude to ~/backup/claude.
+Tiered backup of ~/.claude and ~/.local/share/claude-userdata.
 Retention: every hour for 24 h, every day for 7 d,
            every week for 4 w, every month for 12 m.
 
@@ -52,10 +50,13 @@ print_help_backup() {
     cat <<EOF
 Usage: $(basename "$0") backup
 
-Create a new backup snapshot of ~/.claude.
+Create new backup snapshots of ~/.claude and ~/.local/share/claude-userdata.
 
-Backup location: ~/backup/claude/
-Tiers:
+Backup locations:
+  ~/backup/claude/           for ~/.claude
+  ~/backup/claude-userdata/  for ~/.local/share/claude-userdata
+
+Tiers (per backup target):
   hourly/    One snapshot per clock-hour, keep 24 (covers 24 h)
   daily/     One snapshot per calendar day, keep 7 (covers 1 week)
   weekly/    One snapshot per ISO week, keep 4 (covers ~1 month)
@@ -66,7 +67,8 @@ Daily/weekly/monthly backups are hard-linked copies of the hourly snapshot
 and require no extra I/O.
 
 Environment:
-  BACKUP_ROOT   Override backup root (default: ~/backup/claude)
+  BACKUP_ROOT            Override backup root for ~/.claude (default: ~/backup/claude)
+  BACKUP_ROOT_USERDATA   Override backup root for claude-userdata (default: ~/backup/claude-userdata)
 
 EOF
 }
@@ -75,12 +77,12 @@ print_help_restore() {
     cat <<EOF
 Usage: $(basename "$0") restore [SNAPSHOT]
 
-Restore a backup snapshot to ~/.claude.
+Restore a backup snapshot to its original location.
 
   SNAPSHOT   Tier-qualified name, e.g. hourly/2026-03-23_1400
-             If omitted, an interactive list is shown.
+             If omitted, an interactive list of all targets is shown.
 
-The current ~/.claude is renamed to ~/.claude.bak before restoring.
+The current directory is renamed to <dir>.bak before restoring.
 An existing ~/.claude.bak is removed first.
 
 EOF
@@ -146,11 +148,19 @@ script_path() {
 
 # ── Commands ───────────────────────────────────────────────────────────────────
 
-cmd_backup() {
-    if [ ! -d "$SOURCE_DIR" ]; then
-        log_error "Source directory not found: $SOURCE_DIR"
-        exit 1
+backup_one_target() {
+    local source_dir="$1" backup_root="$2"
+    local short_name="${source_dir#"$HOME"/}"
+
+    if [ ! -d "$source_dir" ]; then
+        log_warn "Source directory not found: $source_dir — skipping."
+        return 0
     fi
+
+    local HOURLY_DIR="$backup_root/hourly"
+    local DAILY_DIR="$backup_root/daily"
+    local WEEKLY_DIR="$backup_root/weekly"
+    local MONTHLY_DIR="$backup_root/monthly"
 
     mkdir -p "$HOURLY_DIR" "$DAILY_DIR" "$WEEKLY_DIR" "$MONTHLY_DIR"
 
@@ -164,17 +174,16 @@ cmd_backup() {
 
     local hourly_dest="$HOURLY_DIR/$hour_label"
     if [ -d "$hourly_dest" ]; then
-        log_info "Hourly snapshot already exists: $hour_label"
+        log_info "[$short_name] Hourly snapshot already exists: $hour_label"
     else
-        # Link against the most recent existing hourly snapshot (if any)
         local link_dest_arg=""
         local latest
         latest=$(ls -1t "$HOURLY_DIR" 2>/dev/null | head -1)
         [ -n "$latest" ] && link_dest_arg="--link-dest=$HOURLY_DIR/$latest"
 
         # shellcheck disable=SC2086
-        rsync -a --delete $link_dest_arg "$SOURCE_DIR/" "$hourly_dest/"
-        log_info "Created hourly backup: $hour_label"
+        rsync -a --delete $link_dest_arg "$source_dir/" "$hourly_dest/"
+        log_info "[$short_name] Created hourly backup: $hour_label"
     fi
 
     # ── Promote to daily ─────────────────────────────────────────────────────
@@ -182,7 +191,7 @@ cmd_backup() {
     local daily_dest="$DAILY_DIR/$day_label"
     if [ ! -d "$daily_dest" ]; then
         cp -al "$hourly_dest" "$daily_dest"
-        log_info "Promoted to daily:   $day_label"
+        log_info "[$short_name] Promoted to daily:   $day_label"
     fi
 
     # ── Promote to weekly ────────────────────────────────────────────────────
@@ -190,7 +199,7 @@ cmd_backup() {
     local weekly_dest="$WEEKLY_DIR/$week_label"
     if [ ! -d "$weekly_dest" ]; then
         cp -al "$hourly_dest" "$weekly_dest"
-        log_info "Promoted to weekly:  $week_label"
+        log_info "[$short_name] Promoted to weekly:  $week_label"
     fi
 
     # ── Promote to monthly ───────────────────────────────────────────────────
@@ -198,7 +207,7 @@ cmd_backup() {
     local monthly_dest="$MONTHLY_DIR/$month_label"
     if [ ! -d "$monthly_dest" ]; then
         cp -al "$hourly_dest" "$monthly_dest"
-        log_info "Promoted to monthly: $month_label"
+        log_info "[$short_name] Promoted to monthly: $month_label"
     fi
 
     # ── Prune ────────────────────────────────────────────────────────────────
@@ -207,35 +216,51 @@ cmd_backup() {
     prune_dir "$DAILY_DIR"   "$DAILY_KEEP"
     prune_dir "$WEEKLY_DIR"  "$WEEKLY_KEEP"
     prune_dir "$MONTHLY_DIR" "$MONTHLY_KEEP"
+}
 
+cmd_backup() {
+    for target in "${BACKUP_TARGETS[@]}"; do
+        local source_dir="${target%%:*}" backup_root="${target#*:}"
+        backup_one_target "$source_dir" "$backup_root"
+    done
     log_info "Backup complete."
 }
 
 cmd_restore() {
     local snapshot="${POSITIONAL[1]:-}"
 
+    # Build list of all snapshots across all targets
+    declare -a all_snapshots=()
+    declare -a all_source_dirs=()
+    declare -a all_backup_roots=()
+
     if [ -z "$snapshot" ]; then
-        # Interactive selection
         echo "Available backups:"
         echo ""
         local i=1
-        declare -a all_snapshots=()
-        for tier in hourly daily weekly monthly; do
-            local dir="$BACKUP_ROOT/$tier"
-            [ -d "$dir" ] || continue
-            while IFS= read -r name; do
-                all_snapshots+=("$tier/$name")
-                printf "  %3d)  %s/%s\n" "$i" "$tier" "$name"
-                (( i++ ))
-            done < <(ls -1t "$dir" 2>/dev/null)
+        for target in "${BACKUP_TARGETS[@]}"; do
+            local source_dir="${target%%:*}" backup_root="${target#*:}"
+            local short_name="${source_dir#"$HOME"/}"
+            echo "  ── ~/$short_name ──"
+            for tier in hourly daily weekly monthly; do
+                local dir="$backup_root/$tier"
+                [ -d "$dir" ] || continue
+                while IFS= read -r name; do
+                    all_snapshots+=("$tier/$name")
+                    all_source_dirs+=("$source_dir")
+                    all_backup_roots+=("$backup_root")
+                    printf "  %3d)  %s/%s\n" "$i" "$tier" "$name"
+                    (( i++ ))
+                done < <(ls -1t "$dir" 2>/dev/null)
+            done
+            echo ""
         done
 
         if [ "${#all_snapshots[@]}" -eq 0 ]; then
-            log_error "No backups found in $BACKUP_ROOT"
+            log_error "No backups found."
             exit 1
         fi
 
-        echo ""
         printf "Enter number (1-%d) or q to quit: " "${#all_snapshots[@]}"
         read -r choice
         [[ "$choice" == "q" || "$choice" == "Q" ]] && exit 0
@@ -244,25 +269,41 @@ cmd_restore() {
             log_error "Invalid selection: $choice"
             exit 1
         fi
-        snapshot="${all_snapshots[$((choice - 1))]}"
+        local idx=$((choice - 1))
+        snapshot="${all_snapshots[$idx]}"
+        local restore_source="${all_source_dirs[$idx]}"
+        local restore_root="${all_backup_roots[$idx]}"
+    else
+        # Explicit snapshot given — try to find which target it belongs to
+        local restore_source="" restore_root=""
+        for target in "${BACKUP_TARGETS[@]}"; do
+            local source_dir="${target%%:*}" backup_root="${target#*:}"
+            if [ -d "$backup_root/$snapshot" ]; then
+                restore_source="$source_dir"
+                restore_root="$backup_root"
+                break
+            fi
+        done
+        if [ -z "$restore_source" ]; then
+            log_error "Snapshot not found: $snapshot"
+            exit 1
+        fi
     fi
 
-    local src="$BACKUP_ROOT/$snapshot"
-    if [ ! -d "$src" ]; then
-        log_error "Snapshot not found: $src"
-        exit 1
-    fi
+    local src="$restore_root/$snapshot"
+    local short_name="${restore_source#"$HOME"/}"
 
-    log_info "Restoring: $snapshot → $SOURCE_DIR"
-    if [ -d "$SOURCE_DIR.bak" ]; then
-        rm -rf "$SOURCE_DIR.bak"
-        log_info "Removed old $SOURCE_DIR.bak"
+    log_info "Restoring: $snapshot → ~/$short_name"
+    if [ -d "$restore_source.bak" ]; then
+        rm -rf "$restore_source.bak"
+        log_info "Removed old ${restore_source}.bak"
     fi
-    if [ -d "$SOURCE_DIR" ]; then
-        mv "$SOURCE_DIR" "$SOURCE_DIR.bak"
-        log_info "Current ~/.claude renamed to ~/.claude.bak"
+    if [ -d "$restore_source" ]; then
+        mv "$restore_source" "$restore_source.bak"
+        log_info "Current ~/$short_name renamed to ~/${short_name}.bak"
     fi
-    rsync -a "$src/" "$SOURCE_DIR/"
+    mkdir -p "$restore_source"
+    rsync -a "$src/" "$restore_source/"
     log_info "Restore complete."
 }
 
@@ -322,34 +363,38 @@ cmd_status() {
     fi
     echo ""
 
-    # Per-tier summary
-    local total_tiers=0
-    for tier in hourly daily weekly monthly; do
-        local dir="$BACKUP_ROOT/$tier"
-        if [ ! -d "$dir" ]; then
-            log_info "  $tier:   (no backups yet)"
-            continue
-        fi
-        local count
-        count=$(ls -1 "$dir" 2>/dev/null | wc -l)
-        local oldest newest size
-        oldest=$(ls -1t "$dir" 2>/dev/null | tail -1)
-        newest=$(ls -1t "$dir" 2>/dev/null | head -1)
-        size=$(du -sh "$dir" 2>/dev/null | cut -f1)
-        printf "${GREEN}[INFO]${NC}  %-8s  %2d snapshot(s)   newest: %-20s  oldest: %-20s  size: %s\n" \
-            "$tier" "$count" "${newest:-(none)}" "${oldest:-(none)}" "$size"
-        (( total_tiers += count ))
-    done
+    for target in "${BACKUP_TARGETS[@]}"; do
+        local source_dir="${target%%:*}" backup_root="${target#*:}"
+        local short_name="${source_dir#"$HOME"/}"
+        echo "  ── ~/$short_name → $backup_root ──"
 
-    echo ""
-    if [ -d "$BACKUP_ROOT" ]; then
-        local total_size
-        total_size=$(du -sh "$BACKUP_ROOT" 2>/dev/null | cut -f1)
-        log_info "Total backup size: $total_size  ($BACKUP_ROOT)"
-    else
-        log_warn "Backup root does not exist yet: $BACKUP_ROOT"
-    fi
-    echo ""
+        # Per-tier summary
+        for tier in hourly daily weekly monthly; do
+            local dir="$backup_root/$tier"
+            if [ ! -d "$dir" ]; then
+                log_info "  $tier:   (no backups yet)"
+                continue
+            fi
+            local count
+            count=$(ls -1 "$dir" 2>/dev/null | wc -l)
+            local oldest newest size
+            oldest=$(ls -1t "$dir" 2>/dev/null | tail -1)
+            newest=$(ls -1t "$dir" 2>/dev/null | head -1)
+            size=$(du -sh "$dir" 2>/dev/null | cut -f1)
+            printf "${GREEN}[INFO]${NC}  %-8s  %2d snapshot(s)   newest: %-20s  oldest: %-20s  size: %s\n" \
+                "$tier" "$count" "${newest:-(none)}" "${oldest:-(none)}" "$size"
+        done
+
+        echo ""
+        if [ -d "$backup_root" ]; then
+            local total_size
+            total_size=$(du -sh "$backup_root" 2>/dev/null | cut -f1)
+            log_info "Size: $total_size  ($backup_root)"
+        else
+            log_warn "Backup root does not exist yet: $backup_root"
+        fi
+        echo ""
+    done
 }
 
 # ── Option parsing ─────────────────────────────────────────────────────────────

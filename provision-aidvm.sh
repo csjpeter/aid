@@ -254,6 +254,7 @@ step_dev_tools() {
         vim \
         neovim \
         tmux \
+        tmuxinator \
         curl \
         wget \
         build-essential \

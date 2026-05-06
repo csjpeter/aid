@@ -28,15 +28,17 @@ Individual steps (also idempotent, safe to re-run):
   dev-tools        Step  2: common dev packages (git vim neovim tmux curl …)
   nodejs           Step  3: Node.js LTS via nodesource
   virtiofs         Step  4: virtiofs shared directory mounts
-  claude           Step  5: Claude CLI + ANTHROPIC_API_KEY
+  agents           Step  5: all AI agents (claude + copilot + gemini + pi)
+  claude           Step  5a: Claude CLI + ANTHROPIC_API_KEY
+  copilot          Step  5b: GitHub Copilot CLI
+  gemini           Step  5c: Google Gemini CLI (npm)
+  pi               Step  5d: Pi coding agent (npm) + ~/.pi virtiofs share
   github-cli       Step  6: GitHub CLI (apt) + gh auth login
-  copilot          Step  7: GitHub Copilot CLI
-  gemini           Step  8: Google Gemini CLI (npm)
-  android-studio   Step  9: Android Studio (snap)
-  qt               Step 10: Qt 6 + Qt Creator (apt)
-  x11              Step 11: SSH X11 forwarding
-  bashrc           Step 12: PATH + host env vars in ~/.bashrc
-  cleanup          Step 13: apt autoremove + clean
+  android-studio   Step  7: Android Studio (snap)
+  qt               Step  8: Qt 6 + Qt Creator (apt)
+  x11              Step  9: SSH X11 forwarding
+  bashrc           Step 10: PATH + host env vars in ~/.bashrc
+  cleanup          Step 11: apt autoremove + clean
 
 To run a single step on an existing VM from the host:
   ssh <vm-name> ~/bin/provision-aidvm.sh <step>
@@ -142,13 +144,34 @@ Step 7 — GitHub Copilot CLI.
 
 EOF
             ;;
+        agents)
+            cat <<EOF
+Usage: $(basename "$0") agents
+
+Step 5 — All AI coding agents.
+  Installs all agents in sequence: claude, copilot, gemini, pi.
+  Each agent step is also individually runnable.
+
+EOF
+            ;;
         gemini)
             cat <<EOF
 Usage: $(basename "$0") gemini
 
-Step 8 — Google Gemini CLI.
+Step 5c — Google Gemini CLI.
   Installs via: sudo npm install -g @google/gemini-cli
   Requires Node.js (step 3). Skipped if gemini is already present.
+
+EOF
+            ;;
+        pi)
+            cat <<EOF
+Usage: $(basename "$0") pi
+
+Step 5d — Pi coding agent.
+  Installs via: sudo npm install -g @mariozechner/pi-coding-agent
+  Requires Node.js (step 3). Skipped if pi is already present.
+  Also adds virtiofs fstab entry and mounts ~/.pi (requires host share).
 
 EOF
             ;;
@@ -156,7 +179,7 @@ EOF
             cat <<EOF
 Usage: $(basename "$0") android-studio
 
-Step 9 — Android Studio.
+Step 7 — Android Studio.
   Installs via: snap install android-studio --classic
   Also writes ANDROID_HOME + PATH to /etc/profile.d/android.sh.
   Launch via SSH X11: ssh -X <user>@<ip> android-studio
@@ -167,7 +190,7 @@ EOF
             cat <<EOF
 Usage: $(basename "$0") qt
 
-Step 10 — Qt 6 & Qt Creator.
+Step 8 — Qt 6 & Qt Creator.
   Installs: qtcreator qt6-base-dev cmake qt6-tools-dev (if available)
   Launch via SSH X11: ssh -X <user>@<ip> qtcreator
 
@@ -177,7 +200,7 @@ EOF
             cat <<EOF
 Usage: $(basename "$0") x11
 
-Step 11 — SSH X11 forwarding.
+Step 9 — SSH X11 forwarding.
   Sets in /etc/ssh/sshd_config:
     X11Forwarding yes
     X11UseLocalhost no
@@ -189,7 +212,7 @@ EOF
             cat <<EOF
 Usage: $(basename "$0") bashrc
 
-Step 12 — Bashrc settings.
+Step 10 — Bashrc settings.
   - Creates ~/bin and ~/.local/bin
   - Writes ~/.ssh/environment with current PATH (makes ~/bin available
     use: ssh <vm> ~/bin/provision-aidvm.sh <step>)
@@ -205,7 +228,7 @@ EOF
             cat <<EOF
 Usage: $(basename "$0") cleanup
 
-Step 13 — Cleanup.
+Step 11 — Cleanup.
   apt-get autoremove + apt-get clean
 
 EOF
@@ -329,6 +352,39 @@ step_gemini() {
     fi
 }
 
+step_pi() {
+    log_title "Pi coding agent"
+    if command -v pi &>/dev/null; then
+        log "Pi already installed: $(pi --version 2>/dev/null || echo 'present')"
+    else
+        sudo npm install -g @mariozechner/pi-coding-agent
+        log "Pi coding agent installed"
+    fi
+
+    # Add virtiofs share for ~/.pi (only when Pi is installed)
+    sudo modprobe virtiofs 2>/dev/null || true
+    local tag="pi" mp="$HOME/.pi"
+    mkdir -p "$mp"
+    if ! grep -qE "^${tag}[[:space:]]" /etc/fstab; then
+        echo "${tag}  ${mp}  virtiofs  defaults  0  0" | sudo tee -a /etc/fstab > /dev/null
+        log "Added fstab entry: ${tag} → ${mp}"
+    fi
+    if mountpoint -q "$mp" 2>/dev/null; then
+        log "$mp already mounted"
+    elif sudo mount -t virtiofs "$tag" "$mp" 2>/dev/null; then
+        log "Mounted ${tag} → ${mp}"
+    else
+        log_warn "Could not mount ${tag} — share may not be attached to this VM"
+    fi
+}
+
+step_agents() {
+    step_claude
+    step_copilot
+    step_gemini
+    step_pi
+}
+
 step_android_studio() {
     log_title "Android Studio"
 
@@ -435,10 +491,8 @@ cmd_run() {
     step_dev_tools
     step_nodejs
     step_virtiofs
-    step_claude
+    step_agents
     step_github_cli
-    step_copilot
-    step_gemini
     step_android_studio
     step_qt
     step_x11
@@ -451,9 +505,10 @@ cmd_run() {
     log "  - git, vim, neovim, tmux, curl, build-essential, cmake, tree, python3"
     log "  - Node.js $(node --version)"
     log "  - Claude CLI          →  claude"
-    log "  - GitHub CLI          →  gh"
     log "  - GitHub Copilot      →  gh copilot suggest / gh copilot explain"
     log "  - Gemini CLI          →  gemini"
+    log "  - Pi coding agent     →  pi"
+    log "  - GitHub CLI          →  gh"
     log "  - Android Studio      →  android-studio  (X11)"
     log "  - Qt Creator          →  qtcreator       (X11)"
     echo
@@ -493,10 +548,12 @@ if [ "$SHOW_HELP" = "true" ]; then
         true-dev-tools)      print_help_step dev-tools ;;
         true-nodejs)         print_help_step nodejs ;;
         true-virtiofs)       print_help_step virtiofs ;;
+        true-agents)         print_help_step agents ;;
         true-claude)         print_help_step claude ;;
-        true-github-cli)     print_help_step github-cli ;;
         true-copilot)        print_help_step copilot ;;
         true-gemini)         print_help_step gemini ;;
+        true-pi)             print_help_step pi ;;
+        true-github-cli)     print_help_step github-cli ;;
         true-android-studio) print_help_step android-studio ;;
         true-qt)             print_help_step qt ;;
         true-x11)            print_help_step x11 ;;
@@ -516,10 +573,12 @@ case "$COMMAND" in
     dev-tools)      step_dev_tools ;;
     nodejs)         step_nodejs ;;
     virtiofs)       step_virtiofs ;;
+    agents)         step_agents ;;
     claude)         step_claude ;;
-    github-cli)     step_github_cli ;;
     copilot)        step_copilot ;;
     gemini)         step_gemini ;;
+    pi)             step_pi ;;
+    github-cli)     step_github_cli ;;
     android-studio) step_android_studio ;;
     qt)             step_qt ;;
     x11)            step_x11 ;;

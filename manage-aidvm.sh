@@ -203,6 +203,7 @@ Shares configured:
   claude-userdata → ~/.local/share/claude-userdata
   gemini          → ~/.gemini
   copilot         → ~/.copilot
+  pi              → ~/.pi
   nvim-config     → ~/.config/nvim
 
 Only works when KVM_HOST=local. Idempotent — already-attached shares are skipped.
@@ -227,15 +228,17 @@ Steps (default: run):
   dev-tools      Step  2: common dev packages (git vim neovim tmux curl …)
   nodejs         Step  3: Node.js LTS via nodesource
   virtiofs       Step  4: virtiofs shared directory mounts
-  claude         Step  5: Claude CLI + ANTHROPIC_API_KEY
+  agents         Step  5: all AI agents (claude + copilot + gemini + pi)
+  claude         Step  5a: Claude CLI + ANTHROPIC_API_KEY
+  copilot        Step  5b: GitHub Copilot CLI
+  gemini         Step  5c: Google Gemini CLI (npm)
+  pi             Step  5d: Pi coding agent (npm)
   github-cli     Step  6: GitHub CLI (apt) + gh auth login
-  copilot        Step  7: GitHub Copilot CLI
-  gemini         Step  8: Google Gemini CLI (npm)
-  android-studio Step  9: Android Studio (snap)
-  qt             Step 10: Qt 6 + Qt Creator (apt)
-  x11            Step 11: SSH X11 forwarding
-  bashrc         Step 12: PATH + host env vars in ~/.bashrc
-  cleanup        Step 13: apt autoremove + clean
+  android-studio Step  7: Android Studio (snap)
+  qt             Step  8: Qt 6 + Qt Creator (apt)
+  x11            Step  9: SSH X11 forwarding
+  bashrc         Step 10: PATH + host env vars in ~/.bashrc
+  cleanup        Step 11: apt autoremove + clean
 
 Options:
   --vm-name=<name>   VM to provision (alternative to positional argument)
@@ -275,8 +278,10 @@ Installed packages:
   - build-essential, cmake, python3, python3-pip
   - Node.js (LTS via nodesource)
   - Claude CLI          →  claude
-  - GitHub CLI          →  gh
   - GitHub Copilot CLI  →  gh copilot suggest / gh copilot explain
+  - Gemini CLI          →  gemini
+  - Pi coding agent     →  pi
+  - GitHub CLI          →  gh
   - Android Studio      →  android-studio  (via snap, GUI via ssh -X)
   - Qt Creator          →  qtcreator       (via apt,  GUI via ssh -X)
 
@@ -293,6 +298,7 @@ Virtiofs shares (host directory → VM mountpoint):
   - ~/.local/share/claude-userdata  →  ~/.local/share/claude-userdata  (tag: claude-userdata)
   - ~/.gemini                       →  ~/.gemini                       (tag: gemini)
   - ~/.copilot                      →  ~/.copilot                      (tag: copilot)
+  - ~/.pi                           →  ~/.pi                           (tag: pi)
   - ~/.config/nvim                  →  ~/.config/nvim                  (tag: nvim-config)
 
 EOF
@@ -471,7 +477,7 @@ cmd_status() {
         echo
         echo "  Mount status inside VM:"
         ssh -o StrictHostKeyChecking=no "${VM_ADMIN_USER}@${VM_IP}" \
-            'for mp in ~/.claude ~/.local/share/claude-userdata ~/.gemini ~/.copilot ~/.config/nvim; do
+            'for mp in ~/.claude ~/.local/share/claude-userdata ~/.gemini ~/.copilot ~/.pi ~/.config/nvim; do
                 if mountpoint -q "$mp" 2>/dev/null; then
                     printf "    %-30s mounted\n" "$mp"
                 else
@@ -531,7 +537,7 @@ cmd_virtiofs() {
     fi
 
     log_title "Checking virtiofs shares for $VM_NAME"
-    mkdir -p "$HOME/.claude" "$HOME/.local/share/claude-userdata" "$HOME/.gemini" "$HOME/.copilot" "$HOME/.config/nvim"
+    mkdir -p "$HOME/.claude" "$HOME/.local/share/claude-userdata" "$HOME/.gemini" "$HOME/.copilot" "$HOME/.pi" "$HOME/.config/nvim"
     local INACTIVE_XML SHARES_CHANGED=false
     INACTIVE_XML=$(sudo virsh dumpxml --inactive "$VM_NAME" 2>/dev/null)
 
@@ -540,6 +546,7 @@ cmd_virtiofs() {
         "claude-userdata:$HOME/.local/share/claude-userdata" \
         "gemini:$HOME/.gemini" \
         "copilot:$HOME/.copilot" \
+        "pi:$HOME/.pi" \
         "nvim-config:$HOME/.config/nvim"
     do
         local tag="${spec%%:*}" path="${spec#*:}"

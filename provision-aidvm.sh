@@ -107,6 +107,7 @@ Step 4 — Virtiofs shared directory mounts.
     claude-userdata → ~/.local/share/claude-userdata
     gemini          → ~/.gemini
     copilot         → ~/.copilot
+    tmuxinator      → ~/.tmuxinator
     nvim-config     → ~/.config/nvim
 
   Adds fstab entries and mounts immediately. Requires the host to have
@@ -283,7 +284,7 @@ step_virtiofs() {
     log_title "Virtiofs shared directories"
     sudo modprobe virtiofs 2>/dev/null || true
 
-    for spec in "claude:$HOME/.claude" "claude-userdata:$HOME/.local/share/claude-userdata" "gemini:$HOME/.gemini" "copilot:$HOME/.copilot" "nvim-config:$HOME/.config/nvim"; do
+    for spec in "claude:$HOME/.claude" "claude-userdata:$HOME/.local/share/claude-userdata" "gemini:$HOME/.gemini" "copilot:$HOME/.copilot" "tmuxinator:$HOME/.tmuxinator" "nvim-config:$HOME/.config/nvim"; do
         tag="${spec%%:*}"
         mp="${spec#*:}"
         mkdir -p "$mp"

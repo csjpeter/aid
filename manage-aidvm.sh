@@ -204,6 +204,7 @@ Shares configured:
   gemini          → ~/.gemini
   copilot         → ~/.copilot
   pi              → ~/.pi
+  tmuxinator      → ~/.tmuxinator
   nvim-config     → ~/.config/nvim
 
 Only works when KVM_HOST=local. Idempotent — already-attached shares are skipped.
@@ -477,7 +478,7 @@ cmd_status() {
         echo
         echo "  Mount status inside VM:"
         ssh -o StrictHostKeyChecking=no "${VM_ADMIN_USER}@${VM_IP}" \
-            'for mp in ~/.claude ~/.local/share/claude-userdata ~/.gemini ~/.copilot ~/.pi ~/.config/nvim; do
+            'for mp in ~/.claude ~/.local/share/claude-userdata ~/.gemini ~/.copilot ~/.pi ~/.tmuxinator ~/.config/nvim; do
                 if mountpoint -q "$mp" 2>/dev/null; then
                     printf "    %-30s mounted\n" "$mp"
                 else
@@ -537,7 +538,7 @@ cmd_virtiofs() {
     fi
 
     log_title "Checking virtiofs shares for $VM_NAME"
-    mkdir -p "$HOME/.claude" "$HOME/.local/share/claude-userdata" "$HOME/.gemini" "$HOME/.copilot" "$HOME/.pi" "$HOME/.config/nvim"
+    mkdir -p "$HOME/.claude" "$HOME/.local/share/claude-userdata" "$HOME/.gemini" "$HOME/.copilot" "$HOME/.pi" "$HOME/.tmuxinator" "$HOME/.config/nvim"
     local INACTIVE_XML SHARES_CHANGED=false
     INACTIVE_XML=$(sudo virsh dumpxml --inactive "$VM_NAME" 2>/dev/null)
 
@@ -547,6 +548,7 @@ cmd_virtiofs() {
         "gemini:$HOME/.gemini" \
         "copilot:$HOME/.copilot" \
         "pi:$HOME/.pi" \
+        "tmuxinator:$HOME/.tmuxinator" \
         "nvim-config:$HOME/.config/nvim"
     do
         local tag="${spec%%:*}" path="${spec#*:}"

@@ -230,6 +230,11 @@ EOF
 
     # ── Mount point ────────────────────────────────────────────────────────────
     log_info "Preparing mount point $mount_point..."
+    # Detect stale FUSE mount: present in /proc/mounts but inaccessible
+    if grep -qs " ${mount_point} " /proc/self/mounts && ! stat "$mount_point" &>/dev/null; then
+        log_warn "$mount_point: stale FUSE mount detected — force unmounting..."
+        fusermount -uz "$mount_point" 2>/dev/null || sudo umount -l "$mount_point" || true
+    fi
     if mountpoint -q "$mount_point" 2>/dev/null; then
         log_info "$mount_point is already mounted."
     elif [ -d "$mount_point" ] && [ -n "$(ls -A "$mount_point" 2>/dev/null)" ]; then

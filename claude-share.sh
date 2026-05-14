@@ -274,6 +274,11 @@ EOF
     local userdata_point="$HOME/.local/share/claude-userdata"
     for mp in "$mount_point" "$userdata_point"; do
         log_info "Preparing mount point $mp..."
+        # Detect stale FUSE mount: present in /proc/mounts but inaccessible
+        if grep -qs " ${mp} " /proc/self/mounts && ! stat "$mp" &>/dev/null; then
+            log_warn "$mp: stale FUSE mount detected — force unmounting..."
+            fusermount -uz "$mp" 2>/dev/null || sudo umount -l "$mp" || true
+        fi
         if mountpoint -q "$mp" 2>/dev/null; then
             log_info "$mp is already mounted."
         elif [ -d "$mp" ] && [ -n "$(ls -A "$mp" 2>/dev/null)" ]; then

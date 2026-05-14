@@ -356,8 +356,12 @@ EOF
             if mountpoint -q "$mp" 2>/dev/null; then
                 log_info "$mp already mounted."
             else
-                systemctl --user start "$svc"
-                log_info "$mp mounted."
+                systemctl --user start "$svc" && sleep 1
+                if mountpoint -q "$mp" 2>/dev/null; then
+                    log_info "$mp mounted."
+                else
+                    log_warn "$mp: service started but mount not confirmed — check: systemctl --user status $svc"
+                fi
             fi
         done
     else

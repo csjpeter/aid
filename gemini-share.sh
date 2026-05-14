@@ -250,14 +250,14 @@ EOF
     cat > "$service_file" << EOF
 [Unit]
 Description=Mount ~/.gemini from desktop via sshfs
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=simple
 ExecStartPre=/bin/mkdir -p %h/.gemini
 ExecStart=/usr/bin/sshfs ${ssh_alias}:.gemini %h/.gemini \
-    -o reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,follow_symlinks
+    -f -o reconnect,ServerAliveInterval=15,ServerAliveCountMax=3
 ExecStop=/usr/bin/fusermount -u %h/.gemini
 
 [Install]

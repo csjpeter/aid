@@ -295,14 +295,14 @@ EOF
     cat > "$service_file" << EOF
 [Unit]
 Description=Mount ~/.claude from desktop via sshfs
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=simple
 ExecStartPre=/bin/mkdir -p %h/.claude
 ExecStart=/usr/bin/sshfs ${ssh_alias}:.claude %h/.claude \
-    -o reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,follow_symlinks
+    -f -o reconnect,ServerAliveInterval=15,ServerAliveCountMax=3
 ExecStop=/usr/bin/fusermount -u %h/.claude
 
 [Install]
@@ -313,14 +313,14 @@ EOF
     cat > "$userdata_service_file" << EOF
 [Unit]
 Description=Mount ~/.local/share/claude-userdata from desktop via sshfs
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=simple
 ExecStartPre=/bin/mkdir -p %h/.local/share/claude-userdata
 ExecStart=/usr/bin/sshfs ${ssh_alias}:.local/share/claude-userdata %h/.local/share/claude-userdata \
-    -o reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,follow_symlinks
+    -f -o reconnect,ServerAliveInterval=15,ServerAliveCountMax=3
 ExecStop=/usr/bin/fusermount -u %h/.local/share/claude-userdata
 
 [Install]

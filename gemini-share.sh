@@ -65,7 +65,7 @@ Usage: $(basename "$0") setup-client [OPTIONS]
 
 Run on the client machine (laptop). Does the following:
   1. Installs sshfs
-  2. Adds a '${CLI_SSH_ALIAS:-desktop}' alias to ~/.ssh/config that automatically
+  2. Adds an alias to ~/.ssh/config (named after --local-host by default) that automatically
      connects via the local hostname when at home, and the external
      hostname+port when away — no manual switching needed
      (skipped if the alias already exists, e.g. added by claude-share.sh)
@@ -77,7 +77,7 @@ Options:
   --local-host=<host>      Desktop hostname on home network
   --external-host=<host>   Desktop hostname via internet
   --external-port=<port>   External SSH port              (default: 22)
-  --ssh-alias=<alias>      SSH config alias for the desktop (default: desktop)
+  --ssh-alias=<alias>      SSH config alias for the desktop (default: short name of --local-host)
 
 Examples:
   $(basename "$0") setup-client \\
@@ -171,11 +171,19 @@ cmd_setup_client() {
     local local_host="${CLI_LOCAL_HOST:-}"
     local external_host="${CLI_EXTERNAL_HOST:-}"
     local external_port="${CLI_EXTERNAL_PORT:-22}"
-    local ssh_alias="${CLI_SSH_ALIAS:-desktop}"
     local mount_point="$HOME/.gemini"
 
     if [ -z "$local_host" ] && [ -z "$external_host" ]; then
         log_error "Specify at least one of --local-host or --external-host."
+        exit 1
+    fi
+
+    local ssh_alias
+    if   [ -n "$CLI_SSH_ALIAS" ];  then ssh_alias="$CLI_SSH_ALIAS"
+    elif [ -n "$local_host" ];     then ssh_alias="${local_host%%.*}"
+    elif [ -n "$external_host" ];  then ssh_alias="${external_host%%.*}"
+    else
+        log_error "Cannot derive SSH alias — specify --ssh-alias, --local-host, or --external-host."
         exit 1
     fi
 
@@ -296,6 +304,18 @@ EOF
         log_info "SSH switches automatically between home (${local_host}) and away (${external_host}:${external_port})."
 }
 
+_resolve_alias() {
+    if [ -n "$CLI_SSH_ALIAS" ]; then echo "$CLI_SSH_ALIAS"; return; fi
+    local found
+    found=$(grep -o '# >>> .* alias begin <<<' "$HOME/.ssh/config" 2>/dev/null \
+        | head -1 | sed 's/# >>> \(.*\) alias begin <<</\1/')
+    if [ -z "$found" ]; then
+        log_error "No SSH alias found in ~/.ssh/config — run setup-client or specify --ssh-alias."
+        exit 1
+    fi
+    echo "$found"
+}
+
 cmd_mount() {
     if mountpoint -q "$HOME/.gemini" 2>/dev/null; then
         log_info "~/.gemini is already mounted."
@@ -342,7 +362,8 @@ cmd_status() {
         log_info "gemini-mount.service: not installed"
     fi
 
-    local ssh_alias="${CLI_SSH_ALIAS:-desktop}"
+    local ssh_alias
+    ssh_alias=$(_resolve_alias)
     if grep -q "Host ${ssh_alias}" "$HOME/.ssh/config" 2>/dev/null; then
         log_info "SSH alias '${ssh_alias}': configured"
         local local_host

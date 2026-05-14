@@ -236,39 +236,41 @@ cmd_setup_client() {
     touch "$HOME/.ssh/config"
     chmod 600 "$HOME/.ssh/config"
 
-    local marker="# >>> ${ssh_alias} alias begin <<<"
-    if grep -q "$marker" "$HOME/.ssh/config" 2>/dev/null; then
-        log_info "SSH alias '${ssh_alias}' already present in ~/.ssh/config — skipping."
-    else
-        {
-            echo ""
-            echo "# >>> ${ssh_alias} alias begin <<<"
-        } >> "$HOME/.ssh/config"
+    local marker_begin="# >>> ${ssh_alias} alias begin <<<"
+    local marker_end="# >>> ${ssh_alias} alias end <<<"
+    if grep -q "$marker_begin" "$HOME/.ssh/config" 2>/dev/null; then
+        log_info "Updating SSH alias '${ssh_alias}' in ~/.ssh/config..."
+        sed -i "/$marker_begin/,/$marker_end/d" "$HOME/.ssh/config"
+    fi
 
-        # If both local and external are given: use Match exec to auto-switch
-        if [ -n "$local_host" ] && [ -n "$external_host" ]; then
-            cat >> "$HOME/.ssh/config" << EOF
+    {
+        echo ""
+        echo "$marker_begin"
+    } >> "$HOME/.ssh/config"
+
+    # If both local and external are given: use Match exec to auto-switch
+    if [ -n "$local_host" ] && [ -n "$external_host" ]; then
+        cat >> "$HOME/.ssh/config" << EOF
 # If desktop is reachable on the local network, connect directly.
 Match Host ${ssh_alias} exec "ping -c1 -W1 ${local_host} >/dev/null 2>&1"
     Hostname ${local_host}
     Port 22
 
 EOF
-        fi
+    fi
 
-        # Default (external, or local-only if no external given)
-        local default_host="${external_host:-$local_host}"
-        cat >> "$HOME/.ssh/config" << EOF
+    # Default (external, or local-only if no external given)
+    local default_host="${external_host:-$local_host}"
+    cat >> "$HOME/.ssh/config" << EOF
 Host ${ssh_alias}
     Hostname ${default_host}
     Port ${external_port}
     User ${desktop_user}
-# >>> ${ssh_alias} alias end <<<
+$marker_end
 EOF
-        log_info "SSH alias '${ssh_alias}' added:"
-        [ -n "$local_host" ]    && log_info "  home: ${local_host}:22"
-        [ -n "$external_host" ] && log_info "  away: ${external_host}:${external_port}"
-    fi
+    log_info "SSH alias '${ssh_alias}' added/updated:"
+    [ -n "$local_host" ]    && log_info "  home: ${local_host}:22"
+    [ -n "$external_host" ] && log_info "  away: ${external_host}:${external_port}"
 
     # ── Mount points ───────────────────────────────────────────────────────────
     local userdata_point="$HOME/.local/share/claude-userdata"

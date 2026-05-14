@@ -353,15 +353,11 @@ EOF
         log_info "SSH connection OK."
         for svc_mp in "claude-mount.service:$mount_point" "claude-userdata-mount.service:$userdata_point"; do
             local svc="${svc_mp%%:*}" mp="${svc_mp#*:}"
+            systemctl --user restart "$svc" && sleep 1
             if mountpoint -q "$mp" 2>/dev/null; then
-                log_info "$mp already mounted."
+                log_info "$mp mounted."
             else
-                systemctl --user start "$svc" && sleep 1
-                if mountpoint -q "$mp" 2>/dev/null; then
-                    log_info "$mp mounted."
-                else
-                    log_warn "$mp: service started but mount not confirmed — check: systemctl --user status $svc"
-                fi
+                log_warn "$mp: service started but mount not confirmed — check: systemctl --user status $svc"
             fi
         done
     else

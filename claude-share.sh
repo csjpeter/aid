@@ -1,5 +1,5 @@
 #!/bin/bash
-# Shares ~/.claude from a desktop machine to other machines via sshfs.
+# Shares ~/.claude from its home machine to other machines via sshfs.
 # The SSH connection automatically picks the local hostname when on the home
 # network, and the external hostname+port when away.
 set -euo pipefail
@@ -12,7 +12,7 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 # ── CLI option defaults ────────────────────────────────────────────────────────
 
-CLI_DESKTOP_USER=""
+CLI_HOME_USER=""
 CLI_LOCAL_HOST=""
 CLI_EXTERNAL_HOST=""
 CLI_EXTERNAL_PORT=""
@@ -24,16 +24,16 @@ print_help_main() {
     cat <<EOF
 Usage: $(basename "$0") <command> [OPTIONS]
 
-Share ~/.claude and ~/.local/share/claude-userdata from the desktop to other
-machines via sshfs.
+Share ~/.claude and ~/.local/share/claude-userdata from their home machine to
+other machines via sshfs.
 The SSH connection auto-selects local or external hostname based on reachability.
 
 Commands:
   setup-server   Verify server-side prerequisites and print client connection info
   setup-client   Install sshfs, SSH alias, and systemd mount services on this machine
-  mount          Mount shared directories from the desktop (client only)
+  mount          Mount shared directories from the home machine (client only)
   umount         Unmount shared directories (client only)
-  sync-json      Sync ~/.claude.json with the desktop (newer side wins)
+  sync-json      Sync ~/.claude.json with the home machine (newer side wins)
   status         Show connection and mount status
   help [cmd]     Show this help, or detailed help for a command (default)
 
@@ -46,7 +46,7 @@ print_help_setup_server() {
     cat <<EOF
 Usage: $(basename "$0") setup-server [OPTIONS]
 
-Run on the desktop machine. Verifies that sshd is running and ~/.claude
+Run on the home machine (where ~/.claude lives). Verifies that sshd is running and ~/.claude
 and ~/.local/share/claude-userdata exist, then prints the connection
 details to use on the client.
 
@@ -77,11 +77,11 @@ Run on the client machine (laptop). Does the following:
      (claude-mount.service and claude-userdata-mount.service)
 
 Options:
-  --desktop-user=<user>    SSH username on the desktop    (default: \$USER)
+  --home-user=<user>    SSH username on the home machine (default: \$USER)
   --local-host=<host>      Desktop hostname on home network
   --external-host=<host>   Desktop hostname via internet
   --external-port=<port>   External SSH port              (default: 22)
-  --ssh-alias=<alias>      SSH config alias for the desktop (default: short name of --local-host)
+  --ssh-alias=<alias>      SSH config alias for the home machine (default: short name of --local-host)
 
 Examples:
   $(basename "$0") setup-client \\
@@ -95,8 +95,8 @@ print_help_mount() {
     cat <<EOF
 Usage: $(basename "$0") mount
 
-Mount ~/.claude and ~/.local/share/claude-userdata from the desktop on
-this machine. Uses systemd user services if available.
+Mount ~/.claude and ~/.local/share/claude-userdata from the home machine
+onto this machine. Uses systemd user services if available.
 
 Examples:
   $(basename "$0") mount
@@ -120,7 +120,7 @@ print_help_sync_json() {
     cat <<EOF
 Usage: $(basename "$0") sync-json
 
-Sync ~/.claude.json between this machine and the desktop.
+Sync ~/.claude.json between this machine and the home machine.
 Compares modification times and copies the newer version to the other side.
 Safe to run at any time — never overwrites a newer file.
 
@@ -192,13 +192,13 @@ cmd_setup_server() {
     echo
     if [ -n "$external_host" ]; then
         echo "  $(basename "$0") setup-client \\"
-        echo "      --desktop-user=$(whoami) \\"
+        echo "      --home-user=$(whoami) \\"
         echo "      --local-host=${local_host} \\"
         echo "      --external-host=${external_host} \\"
         echo "      --external-port=${external_port}"
     else
         echo "  $(basename "$0") setup-client \\"
-        echo "      --desktop-user=$(whoami) \\"
+        echo "      --home-user=$(whoami) \\"
         echo "      --local-host=${local_host} \\"
         echo "      --external-host=<your-external-hostname> \\"
         echo "      --external-port=<port>"
@@ -207,7 +207,7 @@ cmd_setup_server() {
 }
 
 cmd_setup_client() {
-    local desktop_user="${CLI_DESKTOP_USER:-$USER}"
+    local home_user="${CLI_HOME_USER:-$USER}"
     local local_host="${CLI_LOCAL_HOST:-}"
     local external_host="${CLI_EXTERNAL_HOST:-}"
     local external_port="${CLI_EXTERNAL_PORT:-22}"
@@ -259,7 +259,7 @@ cmd_setup_client() {
     # If both local and external are given: use Match exec to auto-switch
     if [ -n "$local_host" ] && [ -n "$external_host" ]; then
         cat >> "$HOME/.ssh/config" << EOF
-# If desktop is reachable on the local network, connect directly.
+# If home machine is reachable on the local network, connect directly.
 Match Host ${ssh_alias} exec "ping -c1 -W1 ${local_host} >/dev/null 2>&1"
     Hostname ${local_host}
     Port 22
@@ -273,7 +273,7 @@ EOF
 Host ${ssh_alias}
     Hostname ${default_host}
     Port ${external_port}
-    User ${desktop_user}
+    User ${home_user}
 $marker_end
 EOF
     log_info "SSH alias '${ssh_alias}' added/updated:"
@@ -309,7 +309,7 @@ EOF
 
     cat > "$service_file" << EOF
 [Unit]
-Description=Mount ~/.claude from desktop via sshfs
+Description=Mount ~/.claude from its home machine via sshfs
 After=network-online.target
 Wants=network-online.target
 
@@ -327,7 +327,7 @@ EOF
     local userdata_service_file="$service_dir/claude-userdata-mount.service"
     cat > "$userdata_service_file" << EOF
 [Unit]
-Description=Mount ~/.local/share/claude-userdata from desktop via sshfs
+Description=Mount ~/.local/share/claude-userdata from its home machine via sshfs
 After=network-online.target
 Wants=network-online.target
 
@@ -366,7 +366,7 @@ EOF
     fi
 
     echo
-    log_info "Done. Shared directories served from ${desktop_user}@${ssh_alias}:"
+    log_info "Done. Shared directories served from ${home_user}@${ssh_alias}:"
     log_info "  ~/.claude                       → ~/.claude"
     log_info "  ~/.local/share/claude-userdata   → ~/.local/share/claude-userdata"
     [ -n "$local_host" ] && [ -n "$external_host" ] && \
@@ -523,8 +523,8 @@ POSITIONAL=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --help|-h)             SHOW_HELP=true ;;
-        --desktop-user=*)      CLI_DESKTOP_USER="${1#*=}" ;;
-        --desktop-user)        CLI_DESKTOP_USER="$2"; shift ;;
+        --home-user=*)      CLI_HOME_USER="${1#*=}" ;;
+        --home-user)        CLI_HOME_USER="$2"; shift ;;
         --local-host=*)        CLI_LOCAL_HOST="${1#*=}" ;;
         --local-host)          CLI_LOCAL_HOST="$2"; shift ;;
         --external-host=*)     CLI_EXTERNAL_HOST="${1#*=}" ;;

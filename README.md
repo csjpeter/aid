@@ -97,12 +97,58 @@ ssh -X user@<ip> qtcreator
 
 ---
 
+## Sharing ~/.claude between machines
+
+`claude-share.sh` mounts `~/.claude` and `~/.local/share/claude-userdata` from the
+home machine (server) onto another machine (client) via sshfs, so Claude sessions,
+history and settings are shared automatically.
+
+### Server side (t14 — where ~/.claude lives)
+
+```bash
+~/bin/aid/claude-share.sh setup-server --local-host=t14.wlan
+```
+
+### Client side (e.g. gulliver/t560 — mounts t14's ~/.claude)
+
+```bash
+~/ai-projects/aid/claude-share.sh setup-client \
+    --home-user=csjpeter \
+    --local-host=t14.wlan \
+    --external-host=csjp.asuscomm.com \
+    --external-port=65439 \
+    --ssh-alias=t14-claude
+```
+
+> **Note:** use `--ssh-alias=t14-claude` (not `t14`) to avoid conflict with the
+> `t14` entry in `/etc/hosts`.
+
+### Other useful commands
+
+```bash
+# Undo setup-client (before re-running with different options)
+~/ai-projects/aid/claude-share.sh uninstall-client --ssh-alias=t14-claude
+
+# Mount manually (if auto-mount via systemd didn't fire)
+~/ai-projects/aid/claude-share.sh mount
+
+# Check status
+~/ai-projects/aid/claude-share.sh status --local-host=t14.wlan
+
+# Sync ~/.claude.json (newer side wins)
+~/ai-projects/aid/claude-share.sh sync-json
+```
+
+---
+
 ## Files
 
 | File | Purpose |
 |---|---|
 | `manage-aidvm.sh` | Orchestrator — collects config, creates and provisions the VM |
 | `provision-aidvm.sh` | Provisioning script — runs on the VM via SSH |
+| `claude-share.sh` | Share ~/.claude between machines via sshfs |
+| `claude-backup.sh` | Tiered backup/restore of ~/.claude (hourly/daily/weekly/monthly) |
 
 ---
 

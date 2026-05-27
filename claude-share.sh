@@ -29,13 +29,14 @@ other machines via sshfs.
 The SSH connection auto-selects local or external hostname based on reachability.
 
 Commands:
-  setup-server   Verify server-side prerequisites and print client connection info
-  setup-client   Install sshfs, SSH alias, and systemd mount services on this machine
-  mount          Mount shared directories from the home machine (client only)
-  umount         Unmount shared directories (client only)
-  sync-json      Sync ~/.claude.json with the home machine (newer side wins)
-  status         Show connection and mount status
-  help [cmd]     Show this help, or detailed help for a command (default)
+  setup-server      Verify server-side prerequisites and print client connection info
+  setup-client      Install sshfs, SSH alias, and systemd mount services on this machine
+  uninstall-client  Remove systemd services and SSH alias installed by setup-client
+  mount             Mount shared directories from the home machine (client only)
+  umount            Unmount shared directories (client only)
+  sync-json         Sync ~/.claude.json with the home machine (newer side wins)
+  status            Show connection and mount status
+  help [cmd]        Show this help, or detailed help for a command (default)
 
 Use '$(basename "$0") <command> --help' for the same per-command help.
 
@@ -87,6 +88,36 @@ Examples:
   $(basename "$0") setup-client \\
       --local-host=<local-host> \\
       --external-host=<external-host> --external-port=<port>
+
+  # t14 → gulliver (use --ssh-alias to avoid conflict with /etc/hosts):
+  $(basename "$0") setup-client \\
+      --home-user=csjpeter \\
+      --local-host=t14.wlan \\
+      --external-host=csjp.asuscomm.com \\
+      --external-port=65439 \\
+      --ssh-alias=t14-claude
+
+EOF
+}
+
+print_help_uninstall_client() {
+    cat <<EOF
+Usage: $(basename "$0") uninstall-client [--ssh-alias=<alias>]
+
+Undo everything that setup-client did on this machine:
+  1. Unmounts ~/.claude and ~/.local/share/claude-userdata (if mounted)
+  2. Stops and disables the systemd user services
+  3. Removes the service files from ~/.config/systemd/user/
+  4. Removes the SSH alias block from ~/.ssh/config
+
+The mount point directories themselves are left in place.
+
+Options:
+  --ssh-alias=<alias>   SSH alias to remove (default: auto-detected from ~/.ssh/config)
+
+Examples:
+  $(basename "$0") uninstall-client
+  $(basename "$0") uninstall-client --ssh-alias=t14-claude
 
 EOF
 }
@@ -373,6 +404,48 @@ EOF
         log_info "SSH switches automatically between home (${local_host}) and away (${external_host}:${external_port})."
 }
 
+cmd_uninstall_client() {
+    local ssh_alias
+    ssh_alias=$(_resolve_alias)
+
+    log_title "Client uninstall"
+
+    # ── Unmount ────────────────────────────────────────────────────────────────
+    for svc_mp in "claude-mount.service:$HOME/.claude" "claude-userdata-mount.service:$HOME/.local/share/claude-userdata"; do
+        local svc="${svc_mp%%:*}" mp="${svc_mp#*:}"
+        if mountpoint -q "$mp" 2>/dev/null; then
+            log_info "Unmounting $mp..."
+            systemctl --user stop "$svc" 2>/dev/null || fusermount -uz "$mp" 2>/dev/null || true
+        fi
+    done
+
+    # ── Systemd services ───────────────────────────────────────────────────────
+    local service_dir="$HOME/.config/systemd/user"
+    for svc in claude-mount.service claude-userdata-mount.service; do
+        if systemctl --user cat "$svc" &>/dev/null 2>&1; then
+            systemctl --user disable "$svc" 2>/dev/null || true
+            log_info "$svc: disabled"
+        fi
+        if [ -f "$service_dir/$svc" ]; then
+            rm -f "$service_dir/$svc"
+            log_info "$svc: removed"
+        fi
+    done
+    systemctl --user daemon-reload
+
+    # ── SSH alias ──────────────────────────────────────────────────────────────
+    local marker_begin="# >>> ${ssh_alias} alias begin <<<"
+    local marker_end="# >>> ${ssh_alias} alias end <<<"
+    if grep -q "$marker_begin" "$HOME/.ssh/config" 2>/dev/null; then
+        sed -i "/$marker_begin/,/$marker_end/d" "$HOME/.ssh/config"
+        log_info "SSH alias '${ssh_alias}': removed from ~/.ssh/config"
+    else
+        log_warn "SSH alias '${ssh_alias}': not found in ~/.ssh/config — nothing to remove"
+    fi
+
+    log_info "Done. Run setup-client to reinstall."
+}
+
 cmd_mount() {
     local any_mounted=false
     for svc_mp in "claude-mount.service:$HOME/.claude" "claude-userdata-mount.service:$HOME/.local/share/claude-userdata"; do
@@ -553,12 +626,13 @@ COMMAND_EXPLICIT="${COMMAND_EXPLICIT:-false}"
 
 if [ "$SHOW_HELP" = "true" ]; then
     case "$COMMAND_EXPLICIT-$COMMAND" in
-        true-setup-server) print_help_setup_server ;;
-        true-setup-client) print_help_setup_client ;;
-        true-mount)        print_help_mount ;;
-        true-umount)       print_help_umount ;;
-        true-sync-json)    print_help_sync_json ;;
-        true-status)       print_help_status ;;
+        true-setup-server)      print_help_setup_server ;;
+        true-setup-client)      print_help_setup_client ;;
+        true-uninstall-client)  print_help_uninstall_client ;;
+        true-mount)             print_help_mount ;;
+        true-umount)            print_help_umount ;;
+        true-sync-json)         print_help_sync_json ;;
+        true-status)            print_help_status ;;
         *)                 print_help_main ;;
     esac
     exit 0
@@ -567,22 +641,24 @@ fi
 case "$COMMAND" in
     help)
         case "${POSITIONAL[1]:-}" in
-            setup-server) print_help_setup_server ;;
-            setup-client) print_help_setup_client ;;
-            mount)        print_help_mount ;;
-            umount)       print_help_umount ;;
-            sync-json)    print_help_sync_json ;;
-            status)       print_help_status ;;
+            setup-server)      print_help_setup_server ;;
+            setup-client)      print_help_setup_client ;;
+            uninstall-client)  print_help_uninstall_client ;;
+            mount)             print_help_mount ;;
+            umount)            print_help_umount ;;
+            sync-json)         print_help_sync_json ;;
+            status)            print_help_status ;;
             *)            print_help_main ;;
         esac
         exit 0
         ;;
-    setup-server) cmd_setup_server ;;
-    setup-client) cmd_setup_client ;;
-    mount)        cmd_mount ;;
-    umount)       cmd_umount ;;
-    sync-json)    cmd_sync_json ;;
-    status)       cmd_status ;;
+    setup-server)      cmd_setup_server ;;
+    setup-client)      cmd_setup_client ;;
+    uninstall-client)  cmd_uninstall_client ;;
+    mount)             cmd_mount ;;
+    umount)            cmd_umount ;;
+    sync-json)         cmd_sync_json ;;
+    status)            cmd_status ;;
     *)
         log_error "Unknown command: $COMMAND"
         print_help_main >&2

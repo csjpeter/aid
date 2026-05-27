@@ -1,5 +1,5 @@
 #!/bin/bash
-# Shares ~/.gemini from its home machine to other machines via sshfs.
+# Shares ~/.opencode from its home machine to other machines via sshfs.
 # The SSH connection automatically picks the local hostname when on the home
 # network, and the external hostname+port when away.
 set -euo pipefail
@@ -24,15 +24,15 @@ print_help_main() {
     cat <<EOF
 Usage: $(basename "$0") <command> [OPTIONS]
 
-Share ~/.gemini from its home machine to other machines via sshfs.
+Share ~/.opencode from its home machine to other machines via sshfs.
 The SSH connection auto-selects local or external hostname based on reachability.
 
 Commands:
   setup-server      Verify server-side prerequisites and print client connection info
   setup-client      Install sshfs, SSH alias, and systemd mount service on this machine
   uninstall-client  Remove systemd service and SSH alias installed by setup-client
-  mount             Mount ~/.gemini from the home machine (client only)
-  umount            Unmount ~/.gemini (client only)
+  mount             Mount ~/.opencode from the home machine (client only)
+  umount            Unmount ~/.opencode (client only)
   status            Show connection and mount status
   help [cmd]        Show this help, or detailed help for a command (default)
 
@@ -45,7 +45,7 @@ print_help_setup_server() {
     cat <<EOF
 Usage: $(basename "$0") setup-server [OPTIONS]
 
-Run on the home machine (where ~/.gemini lives). Verifies that sshd is running and ~/.gemini
+Run on the home machine (where ~/.opencode lives). Verifies that sshd is running and ~/.opencode
 exists, then prints the connection details to use on the client.
 
 Options:
@@ -70,7 +70,7 @@ Run on the client machine (laptop). Does the following:
      connects via the local hostname when at home, and the external
      hostname+port when away — no manual switching needed
      (skipped if the alias already exists, e.g. added by claude-share.sh)
-  3. Backs up any existing ~/.gemini content and prepares the mount point
+  3. Backs up any existing ~/.opencode content and prepares the mount point
   4. Installs and enables a systemd user service for automatic mounting at login
 
 Options:
@@ -101,7 +101,7 @@ print_help_uninstall_client() {
 Usage: $(basename "$0") uninstall-client [--ssh-alias=<alias>]
 
 Undo everything that setup-client did on this machine:
-  1. Unmounts ~/.gemini (if mounted)
+  1. Unmounts ~/.opencode (if mounted)
   2. Stops and disables the systemd user service
   3. Removes the service file from ~/.config/systemd/user/
   4. Removes the SSH alias block from ~/.ssh/config
@@ -122,7 +122,7 @@ print_help_mount() {
     cat <<EOF
 Usage: $(basename "$0") mount
 
-Mount ~/.gemini from the home machine onto this machine.
+Mount ~/.opencode from the home machine onto this machine.
 Uses the systemd user service if available, otherwise runs sshfs directly.
 
 EOF
@@ -132,7 +132,7 @@ print_help_umount() {
     cat <<EOF
 Usage: $(basename "$0") umount
 
-Unmount ~/.gemini on this machine.
+Unmount ~/.opencode on this machine.
 
 EOF
 }
@@ -141,8 +141,8 @@ print_help_status() {
     cat <<EOF
 Usage: $(basename "$0") status
 
-Show the current state of the ~/.gemini mount and SSH connectivity:
-  - Whether ~/.gemini is currently mounted
+Show the current state of the ~/.opencode mount and SSH connectivity:
+  - Whether ~/.opencode is currently mounted
   - Which SSH host is reachable (local or external)
   - Systemd service status (if installed)
 
@@ -161,12 +161,12 @@ cmd_setup_server() {
         exit 1
     fi
 
-    if [ -d "$HOME/.gemini" ]; then
-        log_info "~/.gemini: exists"
+    if [ -d "$HOME/.opencode" ]; then
+        log_info "~/.opencode: exists"
     else
-        log_warn "~/.gemini does not exist yet — it will be created when Gemini CLI first runs."
-        mkdir -p "$HOME/.gemini"
-        log_info "~/.gemini: created"
+        log_warn "~/.opencode does not exist yet — it will be created when Opencode CLI first runs."
+        mkdir -p "$HOME/.opencode"
+        log_info "~/.opencode: created"
     fi
 
     local local_host="${CLI_LOCAL_HOST:-$(hostname)}"
@@ -202,7 +202,7 @@ cmd_setup_client() {
     local local_host="${CLI_LOCAL_HOST:-}"
     local external_host="${CLI_EXTERNAL_HOST:-}"
     local external_port="${CLI_EXTERNAL_PORT:-22}"
-    local mount_point="$HOME/.gemini"
+    local mount_point="$HOME/.opencode"
 
     if [ -z "$local_host" ] && [ -z "$external_host" ]; then
         log_error "Specify at least one of --local-host or --external-host."
@@ -290,29 +290,29 @@ EOF
     # ── Systemd user service ───────────────────────────────────────────────────
     log_info "Installing systemd user service..."
     local service_dir="$HOME/.config/systemd/user"
-    local service_file="$service_dir/gemini-mount.service"
+    local service_file="$service_dir/opencode-mount.service"
     mkdir -p "$service_dir"
 
     cat > "$service_file" << EOF
 [Unit]
-Description=Mount ~/.gemini from its home machine via sshfs
+Description=Mount ~/.opencode from its home machine via sshfs
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStartPre=/bin/mkdir -p %h/.gemini
-ExecStart=/usr/bin/sshfs ${ssh_alias}:.gemini %h/.gemini \
+ExecStartPre=/bin/mkdir -p %h/.opencode
+ExecStart=/usr/bin/sshfs ${ssh_alias}:.opencode %h/.opencode \
     -f -o reconnect,ServerAliveInterval=15,ServerAliveCountMax=3
-ExecStop=/usr/bin/fusermount -u %h/.gemini
+ExecStop=/usr/bin/fusermount -u %h/.opencode
 
 [Install]
 WantedBy=default.target
 EOF
 
     systemctl --user daemon-reload
-    systemctl --user enable gemini-mount.service
-    log_info "Service enabled (gemini-mount.service)."
+    systemctl --user enable opencode-mount.service
+    log_info "Service enabled (opencode-mount.service)."
 
     # ── Test and mount ─────────────────────────────────────────────────────────
     log_info "Testing SSH connection to '${ssh_alias}'..."
@@ -321,7 +321,7 @@ EOF
         if mountpoint -q "$mount_point" 2>/dev/null; then
             log_info "$mount_point already mounted."
         else
-            systemctl --user start gemini-mount.service
+            systemctl --user start opencode-mount.service
             log_info "$mount_point mounted."
         fi
     else
@@ -330,7 +330,7 @@ EOF
     fi
 
     echo
-    log_info "Done. ~/.gemini is now served from ${home_user}@${ssh_alias}:~/.gemini"
+    log_info "Done. ~/.opencode is now served from ${home_user}@${ssh_alias}:~/.opencode"
     [ -n "$local_host" ] && [ -n "$external_host" ] && \
         log_info "SSH switches automatically between home (${local_host}) and away (${external_host}:${external_port})."
 }
@@ -354,20 +354,20 @@ cmd_uninstall_client() {
     log_title "Client uninstall"
 
     # ── Unmount ────────────────────────────────────────────────────────────────
-    if mountpoint -q "$HOME/.gemini" 2>/dev/null; then
-        log_info "Unmounting ~/.gemini..."
-        systemctl --user stop gemini-mount.service 2>/dev/null || fusermount -uz "$HOME/.gemini" 2>/dev/null || true
+    if mountpoint -q "$HOME/.opencode" 2>/dev/null; then
+        log_info "Unmounting ~/.opencode..."
+        systemctl --user stop opencode-mount.service 2>/dev/null || fusermount -uz "$HOME/.opencode" 2>/dev/null || true
     fi
 
     # ── Systemd service ────────────────────────────────────────────────────────
     local service_dir="$HOME/.config/systemd/user"
-    if systemctl --user cat gemini-mount.service &>/dev/null 2>&1; then
-        systemctl --user disable gemini-mount.service 2>/dev/null || true
-        log_info "gemini-mount.service: disabled"
+    if systemctl --user cat opencode-mount.service &>/dev/null 2>&1; then
+        systemctl --user disable opencode-mount.service 2>/dev/null || true
+        log_info "opencode-mount.service: disabled"
     fi
-    if [ -f "$service_dir/gemini-mount.service" ]; then
-        rm -f "$service_dir/gemini-mount.service"
-        log_info "gemini-mount.service: removed"
+    if [ -f "$service_dir/opencode-mount.service" ]; then
+        rm -f "$service_dir/opencode-mount.service"
+        log_info "opencode-mount.service: removed"
     fi
     systemctl --user daemon-reload
 
@@ -385,49 +385,49 @@ cmd_uninstall_client() {
 }
 
 cmd_mount() {
-    if mountpoint -q "$HOME/.gemini" 2>/dev/null; then
-        log_info "~/.gemini is already mounted."
+    if mountpoint -q "$HOME/.opencode" 2>/dev/null; then
+        log_info "~/.opencode is already mounted."
         return
     fi
-    if systemctl --user cat gemini-mount.service &>/dev/null 2>&1; then
-        systemctl --user start gemini-mount.service
-        log_info "~/.gemini mounted via systemd service."
+    if systemctl --user cat opencode-mount.service &>/dev/null 2>&1; then
+        systemctl --user start opencode-mount.service
+        log_info "~/.opencode mounted via systemd service."
     else
-        log_error "gemini-mount.service not found. Run '$(basename "$0") setup-client' first."
+        log_error "opencode-mount.service not found. Run '$(basename "$0") setup-client' first."
         exit 1
     fi
 }
 
 cmd_umount() {
-    if ! mountpoint -q "$HOME/.gemini" 2>/dev/null; then
-        log_info "~/.gemini is not mounted."
+    if ! mountpoint -q "$HOME/.opencode" 2>/dev/null; then
+        log_info "~/.opencode is not mounted."
         return
     fi
-    if systemctl --user cat gemini-mount.service &>/dev/null 2>&1; then
-        systemctl --user stop gemini-mount.service
+    if systemctl --user cat opencode-mount.service &>/dev/null 2>&1; then
+        systemctl --user stop opencode-mount.service
     else
-        fusermount -u "$HOME/.gemini"
+        fusermount -u "$HOME/.opencode"
     fi
-    log_info "~/.gemini unmounted."
+    log_info "~/.opencode unmounted."
 }
 
 cmd_status() {
-    log_title "Gemini share status"
+    log_title "Opencode share status"
 
-    if mountpoint -q "$HOME/.gemini" 2>/dev/null; then
-        log_info "~/.gemini: mounted"
-    elif [ -d "$HOME/.gemini" ]; then
-        log_warn "~/.gemini: directory exists but not mounted"
+    if mountpoint -q "$HOME/.opencode" 2>/dev/null; then
+        log_info "~/.opencode: mounted"
+    elif [ -d "$HOME/.opencode" ]; then
+        log_warn "~/.opencode: directory exists but not mounted"
     else
-        log_warn "~/.gemini: does not exist"
+        log_warn "~/.opencode: does not exist"
     fi
 
-    if systemctl --user cat gemini-mount.service &>/dev/null 2>&1; then
+    if systemctl --user cat opencode-mount.service &>/dev/null 2>&1; then
         local svc_state
-        svc_state=$(systemctl --user is-active gemini-mount.service 2>/dev/null || echo "inactive")
-        log_info "gemini-mount.service: $svc_state"
+        svc_state=$(systemctl --user is-active opencode-mount.service 2>/dev/null || echo "inactive")
+        log_info "opencode-mount.service: $svc_state"
     else
-        log_info "gemini-mount.service: not installed"
+        log_info "opencode-mount.service: not installed"
     fi
 
     local ssh_alias

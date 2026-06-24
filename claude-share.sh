@@ -413,7 +413,12 @@ cmd_uninstall_client() {
     # ── Unmount ────────────────────────────────────────────────────────────────
     for svc_mp in "claude-mount.service:$HOME/.claude" "claude-userdata-mount.service:$HOME/.local/share/claude-userdata"; do
         local svc="${svc_mp%%:*}" mp="${svc_mp#*:}"
-        if mountpoint -q "$mp" 2>/dev/null; then
+        
+        # Detect stale FUSE mount: present in /proc/mounts but inaccessible
+        if grep -qs " ${mp} " /proc/self/mounts && ! stat "$mp" &>/dev/null; then
+            log_warn "$mp: stale FUSE mount detected — force unmounting..."
+            fusermount -uz "$mp" 2>/dev/null || sudo umount -l "$mp" || true
+        elif mountpoint -q "$mp" 2>/dev/null; then
             log_info "Unmounting $mp..."
             systemctl --user stop "$svc" 2>/dev/null || fusermount -uz "$mp" 2>/dev/null || true
         fi
@@ -467,6 +472,15 @@ cmd_mount() {
 cmd_umount() {
     for svc_mp in "claude-mount.service:$HOME/.claude" "claude-userdata-mount.service:$HOME/.local/share/claude-userdata"; do
         local svc="${svc_mp%%:*}" mp="${svc_mp#*:}"
+        
+        # Detect stale FUSE mount: present in /proc/mounts but inaccessible
+        if grep -qs " ${mp} " /proc/self/mounts && ! stat "$mp" &>/dev/null; then
+            log_warn "$mp: stale FUSE mount detected — force unmounting..."
+            fusermount -uz "$mp" 2>/dev/null || sudo umount -l "$mp" || true
+            log_info "$mp unmounted (forced)."
+            continue
+        fi
+        
         if ! mountpoint -q "$mp" 2>/dev/null; then
             log_info "$mp is not mounted."
             continue
@@ -474,7 +488,7 @@ cmd_umount() {
         if systemctl --user cat "$svc" &>/dev/null 2>&1; then
             systemctl --user stop "$svc"
         else
-            fusermount -u "$mp"
+            fusermount -uz "$mp"
         fi
         log_info "$mp unmounted."
     done

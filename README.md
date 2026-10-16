@@ -149,6 +149,8 @@ history and settings are shared automatically.
 | `provision-aidvm.sh` | Provisioning script — runs on the VM via SSH |
 | `claude-share.sh` | Share ~/.claude between machines via sshfs |
 | `backup/claude-backup.sh` | Tiered backup/restore of ~/.claude (hourly/daily/weekly/monthly) |
+| `backup/aid-backup` | Single entry point for all backups, see `docs/backup-model.md` |
+| `claude-travel.sh` | Switch ~/.claude between the t14 mount and a local copy (away from home) |
 
 ---
 

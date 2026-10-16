@@ -135,7 +135,7 @@ prune_dir() {
     if (( count > keep )); then
         local i
         for (( i = keep; i < count; i++ )); do
-            rm -rf "${dir:?}/${entries[$i]}"
+            ( cd "$dir" && rm -rf -- "${entries[$i]:?}" )
             log_info "Pruned: ${dir##*/}/${entries[$i]}"
         done
     fi
@@ -295,6 +295,10 @@ cmd_restore() {
 
     log_info "Restoring: $snapshot → ~/$short_name"
     if [ -d "$restore_source.bak" ]; then
+        case "$restore_source.bak" in
+            "$HOME/.claude.bak"|"$HOME/.local/share/claude-userdata.bak") ;;
+            *) log_error "Unsafe path: $restore_source.bak"; exit 1 ;;
+        esac
         rm -rf "$restore_source.bak"
         log_info "Removed old ${restore_source}.bak"
     fi
@@ -314,7 +318,7 @@ cmd_setup_cron() {
     local cron_marker="claude-backup"
 
     local current_crontab
-    current_crontab=$(crontab -l 2>/dev/null || true)
+    if ! current_crontab=$(crontab -l); then current_crontab=""; fi
 
     if echo "$current_crontab" | grep -qF "$script backup"; then
         log_info "Cron job already present — no change needed."
@@ -335,7 +339,7 @@ cmd_remove_cron() {
     script=$(script_path)
 
     local current_crontab
-    current_crontab=$(crontab -l 2>/dev/null || true)
+    if ! current_crontab=$(crontab -l); then current_crontab=""; fi
 
     if ! echo "$current_crontab" | grep -qF "$script backup"; then
         log_info "No matching cron entry found — nothing to remove."
@@ -356,7 +360,7 @@ cmd_status() {
     script=$(script_path)
 
     # Cron status
-    if crontab -l 2>/dev/null | grep -qF "$script backup"; then
+    if crontab -l | grep -qF "$script backup"; then
         log_info "Cron job: active (hourly)"
     else
         log_warn "Cron job: not configured (run setup-cron to enable)"
@@ -376,11 +380,11 @@ cmd_status() {
                 continue
             fi
             local count
-            count=$(ls -1 "$dir" 2>/dev/null | wc -l)
+            count=$(ls -1 "$dir" | wc -l)
             local oldest newest size
             oldest=$(ls -1r "$dir" | tail -1)
             newest=$(ls -1r "$dir" | head -1)
-            size=$(du -sh "$dir" 2>/dev/null | cut -f1)
+            size=$(du -sh "$dir" | cut -f1)
             printf "${GREEN}[INFO]${NC}  %-8s  %2d snapshot(s)   newest: %-20s  oldest: %-20s  size: %s\n" \
                 "$tier" "$count" "${newest:-(none)}" "${oldest:-(none)}" "$size"
         done
@@ -388,7 +392,7 @@ cmd_status() {
         echo ""
         if [ -d "$backup_root" ]; then
             local total_size
-            total_size=$(du -sh "$backup_root" 2>/dev/null | cut -f1)
+            total_size=$(du -sh "$backup_root" | cut -f1)
             log_info "Size: $total_size  ($backup_root)"
         else
             log_warn "Backup root does not exist yet: $backup_root"

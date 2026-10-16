@@ -18,6 +18,8 @@ BACKUP_TARGETS=(
     "$HOME/.local/share/claude-userdata:${BACKUP_ROOT_USERDATA:-$HOME/backup/claude-userdata}"
 )
 
+# --refresh: update the current hour's snapshot even if it already exists
+REFRESH=false
 HOURLY_KEEP=24
 DAILY_KEEP=7
 WEEKLY_KEEP=4
@@ -173,7 +175,12 @@ backup_one_target() {
     # ── Hourly snapshot ──────────────────────────────────────────────────────
 
     local hourly_dest="$HOURLY_DIR/$hour_label"
-    if [ -d "$hourly_dest" ]; then
+    if [ -d "$hourly_dest" ] && [ "$REFRESH" = true ]; then
+        # Update this hour's snapshot in place (rsync replaces files, it does
+        # not rewrite them, so hardlinked older snapshots stay untouched).
+        rsync -a --delete "$source_dir/" "$hourly_dest/"
+        log_info "[$short_name] Refreshed hourly backup: $hour_label"
+    elif [ -d "$hourly_dest" ]; then
         log_info "[$short_name] Hourly snapshot already exists: $hour_label"
     else
         local link_dest_arg=""
@@ -408,6 +415,7 @@ POSITIONAL=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --help|-h) SHOW_HELP=true ;;
+        --refresh) REFRESH=true ;;
         -*)
             log_error "Unknown option: $1"
             print_help_main >&2

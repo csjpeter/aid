@@ -49,10 +49,19 @@ state of every backup; `aid-backup all` runs every step and reports each failure
 ## Working away from home: `claude-travel.sh`
 
 `~/.claude` on gulliver is normally an sshfs mount of t14's `~/.claude`.
-`claude-travel.sh go` replaces the mount with a local copy (read-only on t14,
-bandwidth-limited; `--from-backup` uses the latest local snapshot when t14 is
-unreachable); `back` merges the local changes up to t14 without deleting
-anything there (overwritten files go to `~/.claude/.travel-backup/<stamp>/`)
-and restores the mount. Both refuse to run while a `claude` process runs.
-`--dry-run` prints the steps. The real switch has not been exercised yet
-because the first test needs a Claude-free moment on gulliver.
+`claude-travel.sh go` switches to a local copy in this order, so nothing
+depends on the network after the unmount:
+
+1. `claude-backup.sh backup --refresh`: fresh local snapshot (mount still alive)
+2. `claude-share.sh sync-json`: `~/.claude.json`, the newer side wins
+3. stop and disable the two mount services
+4. copy the latest local snapshot into the now plain `~/.claude`
+
+`go --from-backup` skips steps 1-2 and uses the latest existing snapshot as it
+is: usable with no connection to t14 (for example if you forgot to switch
+before leaving). `back` merges the local changes up to t14 without deleting
+anything there (overwritten files go to `~/.claude/.travel-backup/<stamp>/`,
+`history.jsonl` is stored beside the original, not merged), moves the local
+copies aside as `<dir>.travel-<stamp>` and restores the mounts. Both refuse to
+run while a `claude` process runs. `--dry-run` prints the steps. The real switch
+has not been exercised yet because the first test needs a Claude-free moment.

@@ -6,8 +6,17 @@
 #   claude-travel.sh go   [--dry-run] [--from-backup]   mount -> local copy
 #   claude-travel.sh back [--dry-run]                   local copy -> mount
 #
+# `go` order (nothing depends on the network after the unmount):
+#   1. claude-backup.sh backup --refresh   (mount still alive: fresh local copy)
+#   2. claude-share.sh sync-json           (~/.claude.json, newer side wins)
+#   3. stop and disable the mount services
+#   4. copy the latest local snapshot into the now plain ~/.claude
+# With --from-backup steps 1-2 are skipped: the latest existing snapshot is
+# used as it is, so it works with no connection to the home machine, e.g. when
+# you forgot to switch before leaving.
+#
 # Safety rules (the home machine may be busy with real work):
-#  - the home machine is only ever READ by `go` (bandwidth limited, niced)
+#  - the home machine is only ever READ (by the backup refresh, niced by rsync defaults)
 #  - `back` never deletes anything there; files it would overwrite are kept
 #    in ~/.claude/.travel-backup/<timestamp>/ on the home machine
 #  - the local copy is renamed aside on `back`, never deleted
@@ -29,7 +38,7 @@ BACKUP_ROOT="${BACKUP_ROOT:-$HOME/backup/claude}"
 STAMP=$(date '+%Y%m%d-%H%M%S')
 DRY_RUN=false; FROM_BACKUP=false
 
-# Not copied from the home machine: caches that Claude rebuilds.
+# Not uploaded to the home machine by `back`: caches that Claude rebuilds.
 GO_EXCLUDES=(--exclude=/cache --exclude=/debug --exclude=/shell-snapshots --exclude=/paste-cache --exclude=/.travel-backup)
 
 run() {
@@ -66,19 +75,22 @@ cmd_status() {
     ls -d "$HOME"/.claude.travel-* "$HOME"/.local/share/claude-userdata.travel-* || echo "(no aside copies)"
 }
 
-fill_from_home() {            # $1 = target path relative to $HOME
-    local t="$1"
-    local exc=()
-    [ "$t" = ".claude" ] && exc=("${GO_EXCLUDES[@]}")
-    run nice -n 19 ionice -c3 rsync -a --bwlimit="$BWLIMIT" "${exc[@]}" "$HOME_HOST:$t/" "$HOME/$t/"
+snapshot_root() {             # $1 = target path relative to $HOME
+    case "$1" in
+        .claude) echo "$BACKUP_ROOT" ;;
+        *)       echo "${BACKUP_ROOT}-userdata" ;;
+    esac
+}
+
+fill_check() {                # fail before the unmount if there is nothing to copy
+    local root
+    root=$(snapshot_root "$1")
+    [ -n "$(ls -1r "$root/hourly" | head -1)" ] || { log_error "No snapshot in $root/hourly"; exit 1; }
 }
 
 fill_from_backup() {          # $1 = target path relative to $HOME
     local t="$1" root latest
-    case "$t" in
-        .claude) root="$BACKUP_ROOT" ;;
-        *)       root="${BACKUP_ROOT}-userdata" ;;
-    esac
+    root=$(snapshot_root "$t")
     latest=$(ls -1r "$root/hourly" | head -1)
     [ -n "$latest" ] || { log_error "No snapshot in $root/hourly"; exit 1; }
     log_info "Using local snapshot $root/hourly/$latest"
@@ -86,20 +98,26 @@ fill_from_backup() {          # $1 = target path relative to $HOME
 }
 
 cmd_go() {
-    local t s
+    local t s here
+    here="$(dirname "$(readlink -f "$0")")"
     refuse_if_claude_running
     for t in "${TARGETS[@]}"; do
         is_mounted "$t" || { log_error "~/$t is not a mount: already local?"; exit 1; }
     done
     if [ "$FROM_BACKUP" = false ]; then
-        home_reachable || { log_error "$HOME_HOST not reachable. Use --from-backup to copy the latest local snapshot."; exit 1; }
-        run "$(dirname "$(readlink -f "$0")")/claude-share.sh" sync-json
+        home_reachable || { log_error "$HOME_HOST not reachable. Use --from-backup to use the latest local snapshot as it is."; exit 1; }
+        # Any failure here aborts before the unmount: nothing has changed yet.
+        run "$here/backup/claude-backup.sh" backup --refresh
+        run "$here/claude-share.sh" sync-json
+    else
+        log_warn "--from-backup: the snapshot is not refreshed, it is as old as the last backup."
     fi
+    for t in "${TARGETS[@]}"; do fill_check "$t"; done
     for s in "${SERVICES[@]}"; do run systemctl --user disable --now "$s"; done
     for t in "${TARGETS[@]}"; do
         if [ "$DRY_RUN" = false ] && is_mounted "$t"; then log_error "~/$t is still mounted"; exit 1; fi
         run mkdir -p "$HOME/$t"
-        if [ "$FROM_BACKUP" = true ]; then fill_from_backup "$t"; else fill_from_home "$t"; fi
+        fill_from_backup "$t"
     done
     log_info "Local mode ready. Start Claude as usual."
 }

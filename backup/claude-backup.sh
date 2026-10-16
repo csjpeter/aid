@@ -130,7 +130,7 @@ prune_dir() {
     local keep="$2"
     [ -d "$dir" ] || return 0
     local entries
-    mapfile -t entries < <(ls -1t "$dir" 2>/dev/null)
+    mapfile -t entries < <(ls -1r "$dir")
     local count="${#entries[@]}"
     if (( count > keep )); then
         local i
@@ -178,7 +178,7 @@ backup_one_target() {
     else
         local link_dest_arg=""
         local latest
-        latest=$(ls -1t "$HOURLY_DIR" 2>/dev/null | head -1)
+        latest=$(ls -1r "$HOURLY_DIR" | head -1)
         [ -n "$latest" ] && link_dest_arg="--link-dest=$HOURLY_DIR/$latest"
 
         # shellcheck disable=SC2086
@@ -251,7 +251,7 @@ cmd_restore() {
                     all_backup_roots+=("$backup_root")
                     printf "  %3d)  %s/%s\n" "$i" "$tier" "$name"
                     (( i++ ))
-                done < <(ls -1t "$dir" 2>/dev/null)
+                done < <(ls -1r "$dir")
             done
             echo ""
         done
@@ -378,8 +378,8 @@ cmd_status() {
             local count
             count=$(ls -1 "$dir" 2>/dev/null | wc -l)
             local oldest newest size
-            oldest=$(ls -1t "$dir" 2>/dev/null | tail -1)
-            newest=$(ls -1t "$dir" 2>/dev/null | head -1)
+            oldest=$(ls -1r "$dir" | tail -1)
+            newest=$(ls -1r "$dir" | head -1)
             size=$(du -sh "$dir" 2>/dev/null | cut -f1)
             printf "${GREEN}[INFO]${NC}  %-8s  %2d snapshot(s)   newest: %-20s  oldest: %-20s  size: %s\n" \
                 "$tier" "$count" "${newest:-(none)}" "${oldest:-(none)}" "$size"

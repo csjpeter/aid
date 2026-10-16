@@ -148,7 +148,7 @@ history and settings are shared automatically.
 | `manage-aidvm.sh` | Orchestrator — collects config, creates and provisions the VM |
 | `provision-aidvm.sh` | Provisioning script — runs on the VM via SSH |
 | `claude-share.sh` | Share ~/.claude between machines via sshfs |
-| `claude-backup.sh` | Tiered backup/restore of ~/.claude (hourly/daily/weekly/monthly) |
+| `backup/claude-backup.sh` | Tiered backup/restore of ~/.claude (hourly/daily/weekly/monthly) |
 
 ---
 

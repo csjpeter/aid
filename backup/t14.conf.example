@@ -1,0 +1,17 @@
+# aid-backup: what to back up from t14 (copy to ~/.config/aid-backup/t14.conf)
+host t14
+base ai-projects
+
+# git repos without a GitHub remote (bare mirror, objects only)
+repo iskola
+repo penzugy
+repo futes-kisokos
+repo supervisor
+repo haztartas/gepeszet
+
+# folders that are not git repos (rsync snapshots)
+files haztartas
+files hazifeladat
+files jogász
+files example-prj
+files vim-plugins

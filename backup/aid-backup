@@ -14,6 +14,8 @@ Commands:
   t14      t14-only repos and folders             (t14-backup.sh backup)
   status   Status of every backup
   all      github, claude and t14 in sequence; reports every failure
+  auto     for cron, hourly: claude every time; t14 and github when their
+           last success is older than 20 h (catches up after sleep/offline)
 USG
 }
 
@@ -22,6 +24,31 @@ run_all() {
     for step in github claude t14; do
         echo "=== $step ==="
         "$0" "$step" || { echo "[ERROR] $step failed" >&2; failed=$((failed + 1)); }
+    done
+    return "$failed"
+}
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/aid-backup"
+MAX_AGE=$((20 * 3600))
+
+run_auto() {
+    local failed=0 step stamp age
+    echo "=== auto $(date '+%F %T') ==="
+    "$0" claude || { echo "[ERROR] claude failed" >&2; failed=$((failed + 1)); }
+    mkdir -p "$STATE_DIR"
+    for step in t14 github; do
+        stamp="$STATE_DIR/$step.ok"
+        age=$MAX_AGE
+        [ -e "$stamp" ] && age=$(( $(date +%s) - $(stat -c %Y "$stamp") ))
+        if [ "$age" -lt "$MAX_AGE" ]; then
+            echo "[INFO] $step: last success $((age / 3600)) h ago, not due"
+            continue
+        fi
+        if ! ssh -o BatchMode=yes -o ConnectTimeout=5 t14 true; then
+            echo "[INFO] $step: due, but t14 is not reachable, retrying next hour"
+            continue
+        fi
+        if "$0" "$step"; then touch "$stamp"; else echo "[ERROR] $step failed" >&2; failed=$((failed + 1)); fi
     done
     return "$failed"
 }
@@ -36,6 +63,7 @@ case "${1:-help}" in
         echo "github: $(ls -1d "${GITHUB_REPOS_DIR:-$HOME/backup/github}"/*/ | wc -l) repos, last log: $(ls -1t "${GITHUB_REPOS_DIR:-$HOME/backup/github}"/.sync-*.log | head -1)"
         ;;
     all)    run_all ;;
+    auto)   run_auto ;;
     help|--help|-h) usage ;;
     *) echo "Unknown command: $1" >&2; usage >&2; exit 1 ;;
 esac

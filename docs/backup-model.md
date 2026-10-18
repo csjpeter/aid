@@ -17,13 +17,19 @@ The t14 lists live in `~/.config/aid-backup/t14.conf` (example:
 ## Schedule (crontab)
 
 ```
-0 * * * *   aid-backup claude   hourly
-30 3 * * *  aid-backup t14      daily
-45 3 * * *  aid-backup github   daily
+0 * * * *   aid-backup auto
 ```
 
-Output of all three goes to `~/aid-backup.log`. `aid-backup status` shows the
-state of every backup; `aid-backup all` runs every step and reports each failure.
+`auto` runs hourly: `claude` every time; `t14` and `github` only when their
+last success (a stamp file in `~/.local/state/aid-backup/`) is older than 20 h
+and t14 is reachable. A laptop that slept through the night (a plain 03:30
+cron entry would be skipped, cron does not catch up) therefore makes the
+backup in the first hour after it wakes up. A failed step leaves its stamp
+alone, so it is retried the next hour.
+
+Output goes to `~/aid-backup.log` (each `auto` run starts with a timestamp
+line). `aid-backup status` shows the state of every backup; `aid-backup all`
+runs every step unconditionally and reports each failure.
 
 ## Guarantees
 
